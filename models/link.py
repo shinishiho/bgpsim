@@ -10,15 +10,15 @@ class Link:
 
     def __init__(
         self,
-        routerA: Router,
-        routerB: Router,
+        router_a: Router,
+        router_b: Router,
         cost: int,
         state: bool = True
 
     ):
-        self.routers = frozenset([routerA, routerB])
-        self.cost = cost
-        self.state = state
+        self.routers    = frozenset([router_a, router_b])
+        self.cost:  int = cost
+        self.state: int = state
 
     def up(self):
         """Change link state to UP"""
@@ -41,18 +41,18 @@ class LinkManager:
 
     def _find(
         self,
-        routerA: Router,
-        routerB: Router
+        router_a: Router,
+        router_b: Router
     ) -> Link | None:
         """Find an established connection between two routers
 
         Keyword arguments:
-        routerA: the first router
-        routerB: the second router
+        router_a: the first router
+        router_b: the second router
         """
 
         for link in self.links:
-            if link.routers == frozenset([routerA, routerB]):
+            if link.routers == frozenset([router_a, router_b]):
                 return link
 
         return None
@@ -60,23 +60,23 @@ class LinkManager:
 
     def create(
         self,
-        routerA: Router,
-        routerB: Router,
+        router_a: Router,
+        router_b: Router,
         cost: int = 10,
     ) -> Link:
         """Create a physical link (connection) between two routers
 
         Keyword arguments:
-        routerA: the first router
-        routerB: the second router
+        router_a: the first router
+        router_b: the second router
         """
 
-        if self._find(routerA, routerB) is not None:
+        if self._find(router_a, router_b) is not None:
             raise ValueError("Link already exists.")
 
         link = Link(
-            routerA=routerA,
-            routerB=routerB,
+            router_a=router_a,
+            router_b=router_b,
             cost=cost
         )
         self.links.add(link)
@@ -86,17 +86,17 @@ class LinkManager:
 
     def delete(
         self,
-        routerA: Router,
-        routerB: Router,
+        router_a: Router,
+        router_b: Router,
     ):
         """Delete a link between two routers (disconnect)
 
         Keyword arguments:
-        routerA: the first router
-        routerB: the second router
+        router_a: the first router
+        router_b: the second router
         """
 
-        link = self._find(routerA, routerB)
+        link = self._find(router_a, router_b)
         if link is None:
             raise ValueError("Link does not exist.")
 

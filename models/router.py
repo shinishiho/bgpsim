@@ -10,10 +10,10 @@ class Router:
     def __init__(
         self,
         name: str,
-        bgpConfig: BGPConfig,
-        bgpSessionConfig: BGPNeighborConfig
+        bgp_config: BGPConfig,
+        bgp_session_config: BGPNeighborConfig
     ):
         self.name: str = name
 
-        self.bgpConfig:        BGPConfig         = bgpConfig
-        self.bgpSessionConfig: BGPNeighborConfig = bgpSessionConfig
+        self.bgp_config:         BGPConfig         = bgp_config
+        self.bgp_session_config: BGPNeighborConfig = bgp_session_config

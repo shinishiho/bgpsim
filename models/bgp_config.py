@@ -7,13 +7,13 @@ class BGPConfig:
     def __init__(
         self,
         asn: int,
-        bgpId: str,
-        holdTime: int = 180,
-        keepaliveInterval: int = 60
+        bgp_id: str,
+        hold_time: int = 180,
+        keepalive_interval: int = 60
     ):
-        self.asn:               int = asn
-        self.holdTime:          int = holdTime
-        self.keepaliveInterval: int = keepaliveInterval
+        self.asn:                int = asn
+        self.hold_time:          int = hold_time
+        self.keepalive_interval: int = keepalive_interval
 
 
 class BGPNeighborConfig:
@@ -30,8 +30,8 @@ class BGPNeighborConfig:
 
     def __init__(
         self,
-        remoteAs: int,
-        nextHopSelf: bool = False
+        remote_as: int,
+        next_hop_self: bool = False
     ):
-        self.remoteAs: int = remoteAs
-        self.nextHopSelf = nextHopSelf
+        self.remote_as:     int  = remote_as
+        self.next_hop_self: bool = next_hop_self
