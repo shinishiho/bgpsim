@@ -1,29 +1,33 @@
 from ipaddress import IPv4Address, IPv4Network
-from dataclasses import dataclass, field
-from .bgp_config import BGPConfig
-from .routing_table import Route, RoutingTable
+
+from .routing_table import Route, RouteType, RoutingTable
 from .packet import Packet
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING is True:
+if TYPE_CHECKING:
     from .link import Link
 
 
-@dataclass
 class Router:
     """Router class
 
     It is a router. It has a name, some interfaces(?), and configurations.
     """
 
-    name: str
-    interfaces: dict[Link, IPv4Address] = field(default_factory=dict)
-    routing_table: RoutingTable = field(default_factory=RoutingTable)
-    bgp_config: BGPConfig = field(default_factory=BGPConfig)
+    def __init__(
+        self,
+        name: str
+    ):
+        self.name = name
+        self.interfaces: list[tuple[Link, IPv4Address]] = []
+        self.routing_table: RoutingTable = RoutingTable()
 
     def add_interface(self, link: Link) -> None:
         ip = link.get_ip(self)
-        self.interfaces[link] = ip
+        if ip is None:
+            raise ValueError(f"{self.name} is not connected to {link.network}")
+
+        self.interfaces.append((link, ip))
         self.routing_table.add(
             Route(
                 network=link.network,
@@ -33,8 +37,8 @@ class Router:
         )
 
     def remove_interface(self, link: Link) -> None:
-        _ = self.interfaces.pop(link)
-        self.routing_table.remove(link.network)
+       self.interfaces = [(l, ip) for l, ip in self.interfaces if l is not link]
+       self.routing_table.remove(link.network)
 
     def add_static_route(self, network: IPv4Network, next_hop: IPv4Address) -> None:
         """Add a static route to the routing table
@@ -44,7 +48,7 @@ class Router:
         next_hop: next hop IP address
         """
         # That said, there should be only one link. It's a lazy way to find the link
-        for link in self.interfaces:
+        for link, ip in self.interfaces:
             if next_hop in link.network:
                 self.routing_table.add(
                     Route(
@@ -55,14 +59,25 @@ class Router:
                 )
                 return
 
-        raise ValueError(f"What is {next_hop} even")
+        raise ValueError(f"{self.name} says: What is {next_hop} even")
+
+    def get_link_to(self, router: Router) -> Link:
+        """Find the link to a router"""
+        for link, ip in self.interfaces:
+            if link.get_peer_of(self) == router:
+                return link
+        raise ValueError(f"{self.name} has no link to {router.name}")
+
+    def has_link_to(self, router: Router) -> bool:
+        """Check if this router has a link to a router"""
+        return any(link.get_peer_of(self) == router for link, ip in self.interfaces)
 
     def forward(self, packet: Packet) -> str:
         """Send the packet to the next hop"""
         packet.hops.append(self.name)
         packet.ttl -= 1
 
-        if packet.dst in self.interfaces.values():
+        if packet.dst in [ip for link, ip in self.interfaces]:
             self.process_packet(packet)
             return f"Finally arrived at {self.name}"
 
@@ -73,8 +88,8 @@ class Router:
         if entry is None:
             return f"{self.name} doesn't know how to route to {packet.dst}"
 
-        peer = entry.link.get_peer(self)
-        if entry.link.state is False:
+        peer = entry.link.get_peer_of(self)
+        if not entry.link.state_is_up:
             return f"The link between {self.name} and {peer.name} is down"
 
         return peer.forward(packet)
