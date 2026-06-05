@@ -1,6 +1,11 @@
+from typing import TYPE_CHECKING
+
 from .router import RouterManager
 from .link import LinkManager
 from .bgp.session import BGPSessionManager
+
+if TYPE_CHECKING:
+    from .router import Router
 
 
 class World:
@@ -15,6 +20,12 @@ class World:
         self.links:        LinkManager       = LinkManager()
         self.bgp_sessions: BGPSessionManager = BGPSessionManager()
         # self.clock:   WorldClock    = WorldClock() # Not interested currently
+
+    def destroy_link(self, router_a: "Router", router_b: "Router") -> None:
+        """Remove a link, then re-evaluate which BGP sessions are still reachable"""
+        self.links.destroy(router_a, router_b)
+        # Later on, in a tick-based world, this should be invoked in every tick? 
+        self.bgp_sessions.update_sessions_state() 
 
 
 class WorldClock:

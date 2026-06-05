@@ -1,6 +1,7 @@
 from collections import deque
 from typing import Iterator, List
 from ipaddress import IPv4Network, IPv4Address
+
 from .router import Router
 
 

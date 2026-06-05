@@ -76,9 +76,10 @@ class Router:
         """Check if this router has a link to a router"""
         return any(link.get_peer_of(self) == router for link, ip in self.interfaces)
 
-    def can_reach(self, router: Router) -> bool:
-        """Check if this router can reach a router"""
-        return True # TODO: do something
+    def can_reach(self, addr: IPv4Address) -> bool:
+        """Is it just as simple as looking up the routing table?"""
+        entry = self.routing_table.lookup(addr)
+        return entry is not None and entry.link.state_is_up
 
     def forward(self, packet: Packet) -> str:
         """Send the packet to the next hop"""

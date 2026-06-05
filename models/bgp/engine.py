@@ -20,6 +20,8 @@ class BGPEngine:
     asn: int = 1
     sessions: list[BGPSession] = field(default_factory=list)
     loc_rib: dict[IPv4Network, BGPRoute] = field(default_factory=dict)
+    # Routes advertised manually
+    manual_rib: dict[IPv4Network, BGPRoute] = field(default_factory=dict)
     # hold_time: int = 180 # Timer is not implemented yet
     # import/export policy?
 
@@ -66,17 +68,20 @@ class BGPEngine:
         Equivalent Cisco command:
         `network <network> mask <mask>`
         """
-        self.loc_rib[network] = BGPRoute(
+        route = BGPRoute(
             prefix=network,
             next_hop=IPv4Address("0.0.0.0"), # TODO: advertise network learned somewhere else
             source=BGPRouteSource(type=BGPRouteSourceType.LOCAL)
         )
+        self.loc_rib[network] = route
+        self.manual_rib[network] = copy.deepcopy(route)
 
     def withdraw_route(
         self,
         network: IPv4Network
     ) -> None:
         """Withdraw a network from BGP"""
+        self.manual_rib.pop(network, None)
         self.loc_rib.pop(network, None)
 
     def update(
@@ -85,15 +90,21 @@ class BGPEngine:
         """Run one calculation pass"""
         # Receive routes
         processing: dict[IPv4Network, list[BGPRoute]] = {}
+
         for session in self.sessions:
+            if not session.is_up:
+                continue # Skip down session
+
             peer_info = session.peer_info_a if self.router is session.router_a else session.peer_info_b
             for route in peer_info.adj_rib_in:
                 route = copy.deepcopy(route)
                 # Get some filtering and policies
                 if self.asn in route.as_path:
                     continue # Loop prevention
+
                 if route.prefix not in processing:
                     processing[route.prefix] = []
+
                 if session.is_ebgp:
                     route.source = BGPRouteSource(
                         type=BGPRouteSourceType.EBGP,
@@ -106,21 +117,35 @@ class BGPEngine:
                         session=session,
                         router=session.router_b if self.router is session.router_a else session.router_a
                     )
+
                 processing[route.prefix].append(route)
 
-        # Pick the best route for each prefix
+        # Rebuild loc_rib
+        new_loc_rib: dict[IPv4Network, BGPRoute] = {}
         for prefix, candidates in processing.items():
-            if prefix in self.loc_rib:
-                candidates.append(self.loc_rib[prefix])
-            best_route = copy.deepcopy(self.calculate_best_route(candidates))
-            self.loc_rib[prefix] = best_route
+            # Manually advertised routes might get beaten by learned routes (which then vanish),
+            # so we need to consider them again
+            if prefix in self.manual_rib:
+                candidates.append(copy.deepcopy(self.manual_rib[prefix]))
+            new_loc_rib[prefix] = self.calculate_best_route(candidates)
+
+        # And then we add manually advertised routes again
+        for prefix, route in self.manual_rib.items():
+            if prefix not in new_loc_rib:
+                new_loc_rib[prefix] = copy.deepcopy(route)
+
+        self.loc_rib = new_loc_rib
 
         # Advertise best routes to peers
         for session in self.sessions:
             peer_info = session.peer_info_a if self.router is session.router_a else session.peer_info_b
             peer_info.adj_rib_out.clear()
+
+            if not session.is_up:
+                continue # Skip down session
+
             for route in self.loc_rib.values():
-                # iBGP split-horizon: don't re-advertise iBGP-learned routes to other iBGP peers
+                # iBGP split-horizon
                 if route.source.type == BGPRouteSourceType.IBGP and not session.is_ebgp:
                     continue
                 
@@ -129,9 +154,8 @@ class BGPEngine:
                 
                 if session.is_ebgp:
                     out_route.as_path = [self.asn] + out_route.as_path
-                    out_route.next_hop = session.link.get_ip(self.router)
+                    out_route.next_hop = session.local_endpoint(self.router)
                 elif peer_info.next_hop_self:
-                    # iBGP with next-hop-self
-                    out_route.next_hop = session.link.get_ip(self.router)
+                    out_route.next_hop = session.local_endpoint(self.router)
                 
                 peer_info.adj_rib_out.append(out_route)
