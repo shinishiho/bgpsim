@@ -46,6 +46,10 @@ class RoutingTable:
     def remove(self, network: IPv4Network) -> None:
        self.routes = [r for r in self.routes if r.network != network]
 
+    def remove_by_type(self, route_type: RouteType) -> None:
+       """Currently used to remove BGP routes, to refresh the routes after each BGP update"""
+       self.routes = [r for r in self.routes if r.route_type is not route_type]
+
     def lookup(self, dst: IPv4Address) -> Route | None:
         """Find all entries in the routing table and return the one with longest matching prefix"""
         matches: list[Route] = [route for route in self.routes if dst in route.network]
