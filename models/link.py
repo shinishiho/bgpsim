@@ -126,7 +126,7 @@ class LinkManager:
         """
 
         if router_a.has_link_to(router_b):
-            raise ValueError("TODO: Do I want to allow multiple links between two routers?")
+            raise ValueError("So I don't want to allow multiple links between two routers")
 
         is_loopback = router_a is router_b
         if is_loopback:
