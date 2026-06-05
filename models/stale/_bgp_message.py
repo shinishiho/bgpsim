@@ -10,9 +10,7 @@ class BGPMessages:
     BGP ID: manually set via `bgp router-id`, highest IP addr in loopback or physical interface.
 
     - "Update": exchange routing information.
-    Withdrawn Route Length: if zero, Withdrawn Route will not show up,
     Withdrawn Route: list all prefix to remove from BGP table,
-    Total Path Attribute Length: total length of all Path Attribute fields,
     Path Attribute: BGP attribute in Type-Length-Value format.
 
     - Other messages waiting for membership :D

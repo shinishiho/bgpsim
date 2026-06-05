@@ -1,4 +1,18 @@
-class BGPStates:
+from enum import Enum
+
+
+CONNECTION_RETRY_TIME = 60
+
+class BGPState(Enum):
+    Idle = 1
+    Connect = 2
+    Active = 3
+    OpenSent = 4
+    OpenConfirm = 5
+    Established = 6
+
+
+class BGPFsm:
     """BGP State class
 
     BGP session can be in one of the following states:
@@ -17,7 +31,7 @@ class BGPStates:
     Moves to "Connect" if ConnectionRetry expires.
     Remains if fails. => Stuck in "Active" = fail to initiate TCP
 
-    - "OpenSent": Waits for Open message.
+    - "OpenSent": Waits for Open message after having sent one.
     Check for params (version, asn, etc.) in the Open message.
     Sends Notification message, moves to "Idle" if sth is wrong.
     Sends Keepalive messages and resets keepalive timer if OK.
@@ -36,4 +50,24 @@ class BGPStates:
     If receives Notification message -> Moves to "Idle".
     """
 
+    def __init__(self):
+        self.state            = BGPState.Idle
+        self.connection_retry = CONNECTION_RETRY_TIME
 
+    def start(self):
+        self.state = BGPState.Connect
+        return self.state
+
+    def connect(self):
+        """We are not doing TCP stuff here, just assume they connect magically."""
+        self.state = BGPState.OpenSent
+        return self.state
+
+    def active(self):
+        """We are not doing TCP stuff here, just assume they connect magically."""
+        self.state = BGPState.OpenSent
+        return self.state
+
+    def open_sent(self):
+        """Wait, how can they send packets?"""
+        pass

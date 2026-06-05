@@ -1,9 +1,15 @@
 from dataclasses import dataclass, field
 from ipaddress import IPv4Network, IPv4Address
+from enum import Enum
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING is True:
+if TYPE_CHECKING:
     from .link import Link
+
+class RouteType(Enum):
+    DIRECT = 0
+    STATIC = 1
+    BGP = 20
 
 
 @dataclass
@@ -11,6 +17,7 @@ class Route:
     """An entry in a router's routing table"""
     network: IPv4Network
     link: Link
+    route_type: RouteType
     next_hop: IPv4Address | None = None
 
 
@@ -19,6 +26,21 @@ class RoutingTable:
     routes: list[Route] = field(default_factory=list)
 
     def add(self, entry: Route) -> None:
+        """Install a route to the routing table
+
+        Taking Administrative Distance into consideration. The lowest AD wins;
+        an equal-or-better AD replaces the existing route for that network.
+        """
+
+        existing = [r for r in self.routes if r.network == entry.network]
+        if existing:
+            best_ad = min(r.route_type.value for r in existing)
+            if best_ad < entry.route_type.value:
+                print(f"Route for {entry.network} already exists with better AD, so not installing")
+                return
+            print(f"Route for {entry.network} already exists with same or worse AD, so it will be replaced")
+            self.routes = [r for r in self.routes if r.network != entry.network]
+
         self.routes.append(entry)
 
     def remove(self, network: IPv4Network) -> None:

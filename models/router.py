@@ -2,6 +2,7 @@ from ipaddress import IPv4Address, IPv4Network
 
 from .routing_table import Route, RouteType, RoutingTable
 from .packet import Packet
+from .bgp.engine import BGPEngine
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -21,6 +22,7 @@ class Router:
         self.name = name
         self.interfaces: list[tuple[Link, IPv4Address]] = []
         self.routing_table: RoutingTable = RoutingTable()
+        self.bgp_engine: BGPEngine = BGPEngine(router=self)
 
     def add_interface(self, link: Link) -> None:
         ip = link.get_ip(self)
@@ -33,6 +35,7 @@ class Router:
                 network=link.network,
                 link=link,
                 next_hop=None,
+                route_type=RouteType.DIRECT
             )
         )
 
@@ -55,6 +58,7 @@ class Router:
                         network=network,
                         link=link,
                         next_hop=next_hop,
+                        route_type=RouteType.STATIC
                     )
                 )
                 return
@@ -71,6 +75,10 @@ class Router:
     def has_link_to(self, router: Router) -> bool:
         """Check if this router has a link to a router"""
         return any(link.get_peer_of(self) == router for link, ip in self.interfaces)
+
+    def can_reach(self, router: Router) -> bool:
+        """Check if this router can reach a router"""
+        return True # TODO: do something
 
     def forward(self, packet: Packet) -> str:
         """Send the packet to the next hop"""
