@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from ipaddress import IPv4Address
+from itertools import combinations
 from typing import TYPE_CHECKING
 
 from .route import BGPRoute
@@ -107,6 +108,14 @@ class BGPSessionManager:
         self.sessions.remove(session)
         session.router_a.bgp_engine.sessions.remove(session)
         session.router_b.bgp_engine.sessions.remove(session)
+
+    def build_ibgp_mesh(self, routers: list[Router]) -> list[BGPSession]:
+        """Create iBGP sessions for every pair in `routers` that doesn't have one yet"""
+        sessions = []
+        for a, b in combinations(routers, 2):
+            if not any({s.router_a, s.router_b} == {a, b} for s in self.sessions):
+                sessions.append(self.create(a, b))
+        return sessions
 
     def update_sessions_state(self) -> None:
         """Check if sessions are still up, and update

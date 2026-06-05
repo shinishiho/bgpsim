@@ -21,6 +21,14 @@ class World:
         self.bgp_sessions: BGPSessionManager = BGPSessionManager()
         # self.clock:   WorldClock    = WorldClock() # Not interested currently
 
+    def build_ibgp_mesh(self, asn: int = 1) -> list:
+        """Create a full iBGP mesh for every router in `asn`.
+
+        Get all routers in `asn` and send them to the BGPSessionManager
+        """
+        routers = [r for r in self.routers.routers if r.bgp_engine.asn == asn]
+        return self.bgp_sessions.build_ibgp_mesh(routers)
+
     def destroy_link(self, router_a: "Router", router_b: "Router") -> None:
         """Remove a link, then re-evaluate which BGP sessions are still reachable"""
         self.links.destroy(router_a, router_b)
