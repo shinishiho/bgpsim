@@ -57,8 +57,6 @@ class BGPSession:
         self.is_up: bool = True  # liveness; recomputed via BGPSessionManager.update_sessions_state()
         # self.state = "ESTABLISHED"  # Maybe for FSM if we still have time
         # self.hold_time: int = 180 # Timer is not implemented yet
-        # TODO: multihop FSM / hold-timer not implemented yet
-        # TODO: multihop forwarding needs recursive next-hop resolution (deferred)
 
     def local_endpoint(self, router: Router) -> IPv4Address:
         """The address `router` advertises as next-hop on this session"""

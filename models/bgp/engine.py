@@ -161,36 +161,41 @@ class BGPEngine:
 
                 peer_info.adj_rib_out.append(out_route)
 
-        # Push the freshly chosen best paths down into the forwarding table
-        self.install_to_fib()
+        # After picking the best ones, let's install to the FIB
+        self.refresh_fib()
 
-    def _resolve_next_hop_link(self, next_hop: IPv4Address):
-        """Find the directly-connected link a next-hop sits on.
+    def _find_next_hop_link(self, next_hop: IPv4Address):
+        """Find the link to reach the next hop
 
-        Returns None when the next-hop is not on any attached network. That gap
-        is where recursive next-hop resolution (multihop) will plug in later.
+        Recursively look up the next hop in the routing table, until directly connected link is found.
+        Return None if not found or route is not valid (e.g. next hop is not reachable).
+
+        Keyword arguments:
+        next_hop: the IP address of the next hop
         """
-        for link, _ip in self.router.interfaces:
-            if next_hop in link.network:
-                return link
-        return None
+        addr = next_hop
+        seen: set[IPv4Address] = set()
+        while addr not in seen:
+            seen.add(addr)
+            # Base case: directly connected, link is found
+            for link, _ip in self.router.interfaces:
+                if addr in link.network:
+                    return link
+            # Find the next hop in the underlay routes
+            entry = self.router.routing_table.lookup(addr, exclude_route_type=RouteType.BGP)
+            if entry is None or entry.next_hop is None:
+                return None
+            addr = entry.next_hop
+        return None # Round and round we go
 
-    def install_to_fib(self) -> None:
-        """Resync the BGP slice of the router's routing table from loc_rib.
-
-        The BGP-owned routes are a pure function of loc_rib, so we drop the old
-        slice and rebuild it. LOCAL-origin routes are skipped (the router owns
-        those networks directly); routes whose next-hop is not directly
-        connected are skipped until recursive resolution exists. Administrative
-        distance (handled by RoutingTable.add) keeps DIRECT/STATIC routes ahead
-        of these BGP routes automatically.
-        """
+    def refresh_fib(self) -> None:
+        """Refresh the FIB according to the current loc_rib"""
         self.router.routing_table.remove_by_type(RouteType.BGP)
 
         for prefix, route in self.loc_rib.items():
             if route.source.type is BGPRouteSourceType.LOCAL:
                 continue
-            link = self._resolve_next_hop_link(route.next_hop)
+            link = self._find_next_hop_link(route.next_hop)
             if link is None: # Unreachable
                 continue
             self.router.routing_table.add(
