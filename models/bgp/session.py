@@ -114,12 +114,21 @@ class BGPSessionManager:
             router.bgp_engine.sessions.remove(session)
 
     def build_ibgp_mesh(self, routers: list[Router]) -> list[BGPSession]:
-        """Create iBGP sessions for every pair in `routers` that doesn't have one yet"""
-        sessions = []
-        for a, b in combinations(routers, 2):
-            if not any(set(s.sides) == {a, b} for s in self.sessions):
-                sessions.append(self.create(a, b))
-        return sessions
+        """Create iBGP sessions for every pair in `routers` that doesn't have one yet.
+
+        Since there's no IGP in this model, all iBGP peers must have a direct link between them.
+        """
+        needed = [
+            (a, b) for a, b in combinations(routers, 2)
+            if not any(set(s.sides) == {a, b} for s in self.sessions)
+        ]
+        missing = [(a, b) for a, b in needed if not a.has_link_to(b)]
+        if missing:
+            pairs = ", ".join(f"{a.name}-{b.name}" for a, b in missing)
+            raise ValueError(
+                f"iBGP mesh needs a direct link between every pair; missing: {pairs}"
+            )
+        return [self.create(a, b) for a, b in needed]
 
     def update_sessions_state(self, clock: WorldClock | None = None) -> None:
         """Evaluate if peers are reachable
