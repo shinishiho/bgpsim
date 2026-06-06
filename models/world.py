@@ -28,9 +28,9 @@ class World:
     def tick(self) -> list[WorldEvent]:
         """Advance the simulation one round.
 
-        Advance the world clock, then update BGP sessions and engines.
- .      Returns the list of events that occurred during this tick.
-        # TODO: Hop propagation delay
+        Check for BGP session state changes, then run BGP engines in two phases.
+        All routers will prepare their outgoing updates, then send at once, so that the order of
+        execution doesn't matter. This also makes the updates propagate once (by one hop) per tick.
         """
         self.clock.now += 1
         before = len(self.clock.events)
@@ -38,9 +38,18 @@ class World:
         self.bgp_sessions.update_sessions_state(clock=self.clock)
 
         for router in self.routers.routers:
-            router.bgp_engine.update(clock=self.clock)
+            router.bgp_engine.compute(clock=self.clock)
+        for router in self.routers.routers:
+            router.bgp_engine.commit(clock=self.clock)
 
         return self.clock.events[before:]
+
+    def converge(self, max_ticks: int = 256) -> int:
+        """Tick continuously until no more updates. Return the number of ticks elapsed."""
+        for ticks in range(1, max_ticks + 1):
+            if not self.tick():
+                return ticks - 1  # the last (empty) tick did no work
+        raise RuntimeError(f"No convergence within {max_ticks} ticks")
 
     def build_ibgp_mesh(self, asn: int = 1) -> list:
         """Create a full iBGP mesh for every router in `asn`.

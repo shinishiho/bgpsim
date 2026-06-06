@@ -24,6 +24,8 @@ class BGPEngine:
     loc_rib: dict[IPv4Network, BGPRoute] = field(default_factory=dict)
     # Routes advertised manually
     manual_rib: dict[IPv4Network, BGPRoute] = field(default_factory=dict)
+    # Advertisements staged by compute(), published by commit() (one-tick delay)
+    _pending_out: list = field(default_factory=list)
     # hold_time: int = 180 # Timer is not implemented yet
     # import/export policy?
 
@@ -88,13 +90,20 @@ class BGPEngine:
 
     def update(
         self,
-        clock: "WorldClock | None" = None,
+        clock: WorldClock | None = None,
     ) -> None:
-        """Run one calculation pass
+        """TODO: check and clean up
+        """
+        self.compute(clock)
+        self.commit(clock)
 
-        When a clock is supplied, every change to loc_rib (a route learned, its
-        best path changed, or a route lost) is recorded onto the timeline. With no
-        clock the pass is silent and behaves exactly as before.
+    def compute(
+        self,
+        clock: WorldClock | None = None,
+    ) -> None:
+        """Phase 1: compute loc_rib + FIB and prepare a list of routes to advertise to all peers
+
+        When a clock is supplied, loc_rib changes are recorded onto the timeline.
         """
         old_loc_rib = self.loc_rib
 
@@ -149,32 +158,84 @@ class BGPEngine:
         if clock is not None:
             self._record_rib_changes(old_loc_rib, new_loc_rib, clock)
 
-        # Advertise best routes to peers
+        # Routes to advertise
+        self._pending_out = []
         for session in self.sessions:
             peer_info = session.peer_info_a if self.router is session.router_a else session.peer_info_b
-            peer_info.adj_rib_out.clear()
 
-            if not session.is_up:
-                continue # Skip down session
+            out_routes: list[BGPRoute] = []
+            if session.is_up:
+                for route in self.loc_rib.values():
+                    # iBGP split-horizon
+                    if route.source.type == BGPRouteSourceType.IBGP and not session.is_ebgp:
+                        continue
 
-            for route in self.loc_rib.values():
-                # iBGP split-horizon
-                if route.source.type == BGPRouteSourceType.IBGP and not session.is_ebgp:
-                    continue
+                    # Bruh python...
+                    out_route = copy.deepcopy(route)
 
-                # Bruh python...
-                out_route = copy.deepcopy(route)
+                    if session.is_ebgp:
+                        out_route.as_path = [self.asn] + out_route.as_path
+                        out_route.next_hop = session.local_endpoint(self.router)
+                    elif peer_info.next_hop_self or route.source.type is BGPRouteSourceType.LOCAL:
+                        out_route.next_hop = session.local_endpoint(self.router)
 
-                if session.is_ebgp:
-                    out_route.as_path = [self.asn] + out_route.as_path
-                    out_route.next_hop = session.local_endpoint(self.router)
-                elif peer_info.next_hop_self or route.source.type is BGPRouteSourceType.LOCAL:
-                    out_route.next_hop = session.local_endpoint(self.router)
+                    out_routes.append(out_route)
 
-                peer_info.adj_rib_out.append(out_route)
+            self._pending_out.append((session, peer_info, out_routes))
 
         # After picking the best ones, let's install to the FIB
         self.refresh_fib()
+
+    def commit(
+        self,
+        clock: WorldClock | None = None,
+    ) -> None:
+        """Phase 2: publish the staged advertisements to peers
+
+        Replaces each peer's adj_rib_out contents in place (preserving the list
+        object the peer reads as its adj_rib_in). When a clock is supplied, every
+        change to what we advertise is recorded as a BGP UPDATE event.
+        """
+        for session, peer_info, out_routes in self._pending_out:
+            if clock is not None:
+                self._record_bgp_update(session, peer_info.adj_rib_out, out_routes, clock)
+            peer_info.adj_rib_out[:] = out_routes
+        self._pending_out = []
+
+    def _record_bgp_update(
+        self,
+        session: BGPSession,
+        old_rib_out: list[BGPRoute],
+        new_rib_out: list[BGPRoute],
+        clock: WorldClock,
+    ) -> None:
+        """Narrate the BGP UPDATE this router sends a peer when adj_rib_out changes.
+
+        Check every prefix attribute, and only record the change if there's a difference.
+        """
+        def by_prefix(routes: list[BGPRoute]) -> dict:
+            return {r.prefix: (r.next_hop, tuple(r.as_path), r.local_pref, r.med, r.weight)
+                    for r in routes}
+
+        old_rib = by_prefix(old_rib_out)
+        new_rib = by_prefix(new_rib_out)
+
+        peer = session.get_peer(self.router)
+        peer_ip = session.remote_endpoint(self.router)
+        name = self.router.name
+
+        for prefix, attributes in new_rib.items():
+            if prefix not in old_rib or old_rib[prefix] != attributes:
+                clock.record(
+                    f"{name} sent an UPDATE to {peer.name} ({prefix})",
+                    f"%BGP-6-UPDATE: neighbor {peer_ip} sent prefix {prefix}",
+                )
+        for prefix in old_rib:
+            if prefix not in new_rib:
+                clock.record(
+                    f"{name} withdrew {prefix} from {peer.name}",
+                    f"%BGP-6-UPDATE: neighbor {peer_ip} withdrew prefix {prefix}",
+                )
 
     def _record_rib_changes(
         self,
