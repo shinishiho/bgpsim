@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from ipaddress import IPv4Address
 from itertools import combinations
 from typing import TYPE_CHECKING
@@ -21,6 +21,9 @@ class BGPPeerInfo:
     peer_ip: IPv4Address  # the address of the peer
     adj_rib_in: list[BGPRoute]
     adj_rib_out: list[BGPRoute]
+    # Next adj_rib_out, built by the engine's compute() and flushed into
+    # adj_rib_out by commit() (the one-tick publish delay).
+    pending_out: list[BGPRoute] = field(default_factory=list)
     next_hop_self: bool = False
 
 

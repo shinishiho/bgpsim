@@ -24,8 +24,6 @@ class BGPEngine:
     loc_rib: dict[IPv4Network, BGPRoute] = field(default_factory=dict)
     # Routes advertised manually
     manual_rib: dict[IPv4Network, BGPRoute] = field(default_factory=dict)
-    # Advertisements staged by compute(), published by commit() (one-tick delay)
-    _pending_out: list[tuple[BGPPeerInfo, list[BGPRoute]]] = field(default_factory=list)
     # hold_time: int = 180 # Timer is not implemented yet
     # import/export policy?
 
@@ -151,8 +149,6 @@ class BGPEngine:
         if clock is not None:
             self._record_rib_changes(old_loc_rib, new_loc_rib, clock)
 
-        # Routes to advertise
-        self._pending_out = []
         for session in self.sessions:
             side = session.view(self.router)
 
@@ -174,7 +170,7 @@ class BGPEngine:
 
                     out_routes.append(out_route)
 
-            self._pending_out.append((side, out_routes))
+            side.pending_out = out_routes
 
         # After picking the best ones, let's install to the FIB
         self.refresh_fib()
@@ -189,11 +185,11 @@ class BGPEngine:
         object the peer reads as its adj_rib_in). When a clock is supplied, every
         change to what we advertise is recorded as a BGP UPDATE event.
         """
-        for side, out_routes in self._pending_out:
+        for session in self.sessions:
+            side = session.view(self.router)
             if clock is not None:
-                self._record_bgp_update(side, out_routes, clock)
-            side.adj_rib_out[:] = out_routes
-        self._pending_out = []
+                self._record_bgp_update(side, side.pending_out, clock)
+            side.adj_rib_out[:] = side.pending_out
 
     def _record_bgp_update(
         self,
