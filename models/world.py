@@ -189,10 +189,8 @@ class World:
 
     def _record_session(self, session: BGPSession) -> None:
         """Record a world event for BGP session creation"""
-        for router in (session.router_a, session.router_b):
-            peer = session.router_b if router is session.router_a else session.router_a
-            remote_as = peer.bgp_engine.asn
-            peer_ip = session.remote_endpoint(router)
+        for side in session.sides.values():
+            router, peer, peer_ip, remote_as = side.router, side.peer, side.peer_ip, side.remote_as
             kind = "eBGP" if session.is_ebgp else "iBGP"
             self.clock.record(
                 f"{router.name} opened an {kind} session to {peer.name} ({peer_ip}, AS{remote_as})",

@@ -12,25 +12,20 @@ if TYPE_CHECKING:
 
 @dataclass
 class BGPPeerInfo:
-    """BGP peer information perceived by a router in a BGP session"""
+    """One router's view of its side of a BGP session"""
 
+    router: Router
+    peer: Router
     remote_as: int
-    # This router's adj_rib_in is the other's adj_rib_out...
+    self_ip: IPv4Address  # the address this router advertises / is reached at
+    peer_ip: IPv4Address  # the address of the peer
     adj_rib_in: list[BGPRoute]
     adj_rib_out: list[BGPRoute]
     next_hop_self: bool = False
 
 
 class BGPSession:
-    """BGP session, or BGP adjacency between two routers
-
-    A session is identified by the two peer *endpoint* addresses (the BGP
-    update-source each router advertises as next-hop), not by a link. This is
-    uniform for single-hop and multihop sessions: whether the peers are directly
-    adjacent or reached over a routed path is a topology fact, not session state.
-    Liveness is driven by reachability of the peer endpoint (see
-    BGPSessionManager.update_sessions_state), not by link existence.
-    """
+    """BGP session, or BGP adjacency between two routers"""
 
     def __init__(
         self,
@@ -39,34 +34,39 @@ class BGPSession:
         source_addr_a: IPv4Address,
         source_addr_b: IPv4Address,
     ):
-        self.router_a = router_a
-        self.router_b = router_b
-        self.endpoint_a = source_addr_a  # address router_a advertises / is reached at
-        self.endpoint_b = source_addr_b  # address router_b advertises / is reached at
-        self.adj_rib_a: list[BGPRoute] = []  # Router A outgoing routes
-        self.adj_rib_b: list[BGPRoute] = []  # Router B outgoing routes
-        self.peer_info_a = BGPPeerInfo(
-            remote_as=router_b.bgp_engine.asn,
-            adj_rib_in=self.adj_rib_b,
-            adj_rib_out=self.adj_rib_a
-        )
-        self.peer_info_b = BGPPeerInfo(
-            remote_as=router_a.bgp_engine.asn,
-            adj_rib_in=self.adj_rib_a,
-            adj_rib_out=self.adj_rib_b
-        )
+        self.adj_rib_a: list[BGPRoute] = []  # router_a outgoing routes
+        self.adj_rib_b: list[BGPRoute] = []  # router_b outgoing routes
+        self.sides: dict[Router, BGPPeerInfo] = {
+            router_a: BGPPeerInfo(
+                router=router_a,
+                peer=router_b,
+                remote_as=router_b.bgp_engine.asn,
+                self_ip=source_addr_a,
+                peer_ip=source_addr_b,
+                adj_rib_in=self.adj_rib_b,
+                adj_rib_out=self.adj_rib_a,
+            ),
+            router_b: BGPPeerInfo(
+                router=router_b,
+                peer=router_a,
+                remote_as=router_a.bgp_engine.asn,
+                self_ip=source_addr_b,
+                peer_ip=source_addr_a,
+                adj_rib_in=self.adj_rib_a,
+                adj_rib_out=self.adj_rib_b,
+            ),
+        }
         self.is_ebgp = router_a.bgp_engine.asn != router_b.bgp_engine.asn
-        self.is_up: bool = True  # liveness; recomputed via BGPSessionManager.update_sessions_state()
+        self.is_up: bool = True
         # self.state = "ESTABLISHED"  # Maybe for FSM if we still have time
         # self.hold_time: int = 180 # Timer is not implemented yet
 
-    def local_endpoint(self, router: Router) -> IPv4Address:
-        """The address `router` advertises as next-hop on this session"""
-        return self.endpoint_a if router is self.router_a else self.endpoint_b
-
-    def remote_endpoint(self, router: Router) -> IPv4Address:
-        """The peer address `router` reaches across this session"""
-        return self.endpoint_b if router is self.router_a else self.endpoint_a
+    def view(self, router: Router) -> BGPPeerInfo:
+        """This router's side of the session (its view of the peer)"""
+        try:
+            return self.sides[router]
+        except KeyError:
+            raise ValueError(f"{router.name} is not in this session")
 
 
 class BGPSessionManager:
@@ -107,14 +107,14 @@ class BGPSessionManager:
     def destroy(self, session: BGPSession) -> None:
         """Destroy a BGP session"""
         self.sessions.remove(session)
-        session.router_a.bgp_engine.sessions.remove(session)
-        session.router_b.bgp_engine.sessions.remove(session)
+        for router in session.sides:
+            router.bgp_engine.sessions.remove(session)
 
     def build_ibgp_mesh(self, routers: list[Router]) -> list[BGPSession]:
         """Create iBGP sessions for every pair in `routers` that doesn't have one yet"""
         sessions = []
         for a, b in combinations(routers, 2):
-            if not any({s.router_a, s.router_b} == {a, b} for s in self.sessions):
+            if not any(set(s.sides) == {a, b} for s in self.sessions):
                 sessions.append(self.create(a, b))
         return sessions
 
@@ -125,9 +125,8 @@ class BGPSessionManager:
         If a clock is supplied, record session up/down transitions to the timeline.
         """
         for session in self.sessions:
-            is_still_up = (
-                session.router_a.can_reach(session.endpoint_b)
-                and session.router_b.can_reach(session.endpoint_a)
+            is_still_up = all(
+                side.router.can_reach(side.peer_ip) for side in session.sides.values()
             )
             was_up = session.is_up
             if was_up and not is_still_up:
@@ -140,9 +139,8 @@ class BGPSessionManager:
 
     def _record_adjacency(self, session: BGPSession, is_up: bool, clock: WorldClock) -> None:
         """Emits world events for session up/down transitions"""
-        for router in (session.router_a, session.router_b):
-            peer = session.router_b if router is session.router_a else session.router_a
-            peer_ip = session.remote_endpoint(router)
+        for side in session.sides.values():
+            router, peer, peer_ip = side.router, side.peer, side.peer_ip
             if is_up:
                 clock.record(
                     f"{router.name}'s session with {peer.name} came up",

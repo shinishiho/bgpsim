@@ -2,7 +2,7 @@ import copy
 from dataclasses import dataclass, field
 from ipaddress import IPv4Address, IPv4Network
 
-from .session import BGPSession
+from .session import BGPSession, BGPPeerInfo
 from .route import BGPRoute, BGPRouteSource, BGPRouteSourceType
 from ..routing_table import Route, RouteType
 from typing import TYPE_CHECKING
@@ -25,7 +25,7 @@ class BGPEngine:
     # Routes advertised manually
     manual_rib: dict[IPv4Network, BGPRoute] = field(default_factory=dict)
     # Advertisements staged by compute(), published by commit() (one-tick delay)
-    _pending_out: list = field(default_factory=list)
+    _pending_out: list[tuple[BGPPeerInfo, list[BGPRoute]]] = field(default_factory=list)
     # hold_time: int = 180 # Timer is not implemented yet
     # import/export policy?
 
@@ -114,8 +114,8 @@ class BGPEngine:
             if not session.is_up:
                 continue # Skip down session
 
-            peer_info = session.peer_info_a if self.router is session.router_a else session.peer_info_b
-            for route in peer_info.adj_rib_in:
+            side = session.view(self.router)
+            for route in side.adj_rib_in:
                 route = copy.deepcopy(route)
                 # Get some filtering and policies
                 if self.asn in route.as_path:
@@ -124,18 +124,11 @@ class BGPEngine:
                 if route.prefix not in processing:
                     processing[route.prefix] = []
 
-                if session.is_ebgp:
-                    route.source = BGPRouteSource(
-                        type=BGPRouteSourceType.EBGP,
-                        session=session,
-                        router=session.router_b if self.router is session.router_a else session.router_a
-                    )
-                else:
-                    route.source = BGPRouteSource(
-                        type=BGPRouteSourceType.IBGP,
-                        session=session,
-                        router=session.router_b if self.router is session.router_a else session.router_a
-                    )
+                route.source = BGPRouteSource(
+                    type=BGPRouteSourceType.EBGP if session.is_ebgp else BGPRouteSourceType.IBGP,
+                    session=session,
+                    router=side.peer,
+                )
 
                 processing[route.prefix].append(route)
 
@@ -161,7 +154,7 @@ class BGPEngine:
         # Routes to advertise
         self._pending_out = []
         for session in self.sessions:
-            peer_info = session.peer_info_a if self.router is session.router_a else session.peer_info_b
+            side = session.view(self.router)
 
             out_routes: list[BGPRoute] = []
             if session.is_up:
@@ -175,13 +168,13 @@ class BGPEngine:
 
                     if session.is_ebgp:
                         out_route.as_path = [self.asn] + out_route.as_path
-                        out_route.next_hop = session.local_endpoint(self.router)
-                    elif peer_info.next_hop_self or route.source.type is BGPRouteSourceType.LOCAL:
-                        out_route.next_hop = session.local_endpoint(self.router)
+                        out_route.next_hop = side.self_ip
+                    elif side.next_hop_self or route.source.type is BGPRouteSourceType.LOCAL:
+                        out_route.next_hop = side.self_ip
 
                     out_routes.append(out_route)
 
-            self._pending_out.append((session, peer_info, out_routes))
+            self._pending_out.append((side, out_routes))
 
         # After picking the best ones, let's install to the FIB
         self.refresh_fib()
@@ -196,16 +189,15 @@ class BGPEngine:
         object the peer reads as its adj_rib_in). When a clock is supplied, every
         change to what we advertise is recorded as a BGP UPDATE event.
         """
-        for session, peer_info, out_routes in self._pending_out:
+        for side, out_routes in self._pending_out:
             if clock is not None:
-                self._record_bgp_update(session, peer_info.adj_rib_out, out_routes, clock)
-            peer_info.adj_rib_out[:] = out_routes
+                self._record_bgp_update(side, out_routes, clock)
+            side.adj_rib_out[:] = out_routes
         self._pending_out = []
 
     def _record_bgp_update(
         self,
-        session: BGPSession,
-        old_rib_out: list[BGPRoute],
+        side: BGPPeerInfo,
         new_rib_out: list[BGPRoute],
         clock: WorldClock,
     ) -> None:
@@ -217,11 +209,11 @@ class BGPEngine:
             return {r.prefix: (r.next_hop, tuple(r.as_path), r.local_pref, r.med, r.weight)
                     for r in routes}
 
-        old_rib = by_prefix(old_rib_out)
+        old_rib = by_prefix(side.adj_rib_out)
         new_rib = by_prefix(new_rib_out)
 
-        peer = session.get_peer(self.router)
-        peer_ip = session.remote_endpoint(self.router)
+        peer = side.peer
+        peer_ip = side.peer_ip
         name = self.router.name
 
         for prefix, attributes in new_rib.items():
