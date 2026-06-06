@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..router import Router
+    from ..world import WorldClock
 
 @dataclass
 class BGPEngine:
@@ -86,9 +87,17 @@ class BGPEngine:
         self.loc_rib.pop(network, None)
 
     def update(
-        self
+        self,
+        clock: "WorldClock | None" = None,
     ) -> None:
-        """Run one calculation pass"""
+        """Run one calculation pass
+
+        When a clock is supplied, every change to loc_rib (a route learned, its
+        best path changed, or a route lost) is recorded onto the timeline. With no
+        clock the pass is silent and behaves exactly as before.
+        """
+        old_loc_rib = self.loc_rib
+
         # Receive routes
         processing: dict[IPv4Network, list[BGPRoute]] = {}
 
@@ -137,6 +146,9 @@ class BGPEngine:
 
         self.loc_rib = new_loc_rib
 
+        if clock is not None:
+            self._record_rib_changes(old_loc_rib, new_loc_rib, clock)
+
         # Advertise best routes to peers
         for session in self.sessions:
             peer_info = session.peer_info_a if self.router is session.router_a else session.peer_info_b
@@ -163,6 +175,44 @@ class BGPEngine:
 
         # After picking the best ones, let's install to the FIB
         self.refresh_fib()
+
+    def _record_rib_changes(
+        self,
+        old_loc_rib: dict[IPv4Network, BGPRoute],
+        new_loc_rib: dict[IPv4Network, BGPRoute],
+        clock: "WorldClock",
+    ) -> None:
+        """Narrate how this pass changed loc_rib onto the timeline.
+
+        Routes are compared by best-path identity, so a re-selected path with the
+        same attributes is (correctly) not reported as a change.
+        """
+        def identity(route: BGPRoute):
+            return (route.next_hop, tuple(route.as_path), route.local_pref, route.weight)
+
+        def detail(route: BGPRoute) -> str:
+            return (f"next_hop={route.next_hop} as_path={route.as_path} "
+                    f"local_pref={route.local_pref} weight={route.weight}")
+
+        name = self.router.name
+        for prefix, route in new_loc_rib.items():
+            if prefix not in old_loc_rib:
+                clock.record(
+                    f"{name} learned a route to {prefix}",
+                    f"loc_rib[{prefix}] += {detail(route)}",
+                )
+            elif identity(route) != identity(old_loc_rib[prefix]):
+                clock.record(
+                    f"{name} changed its best path to {prefix}",
+                    f"loc_rib[{prefix}] = {detail(route)}",
+                )
+
+        for prefix in old_loc_rib:
+            if prefix not in new_loc_rib:
+                clock.record(
+                    f"{name} lost its route to {prefix}",
+                    f"loc_rib[{prefix}] removed",
+                )
 
     def _find_next_hop_link(self, next_hop: IPv4Address):
         """Find the link to reach the next hop

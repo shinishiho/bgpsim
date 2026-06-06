@@ -65,6 +65,22 @@ class Router:
 
         raise ValueError(f"{self.name} says: What is {next_hop} even")
 
+    def interface_name(self, link: Link) -> str:
+        """Cisco-style name for this router's interface on `link`.
+
+        Physical links become GigabitEthernet0/N, loopbacks become LoopbackN,
+        numbered per-kind in the order the interfaces were attached.
+        """
+        is_loopback = link.get_peer_of(self) is self
+        index = 0
+        for attached, _ip in self.interfaces:
+            if (attached.get_peer_of(self) is self) != is_loopback:
+                continue
+            if attached is link:
+                break
+            index += 1
+        return f"Loopback{index}" if is_loopback else f"GigabitEthernet0/{index}"
+
     def get_link_to(self, router: Router) -> Link:
         """Find the link to a router"""
         for link, ip in self.interfaces:

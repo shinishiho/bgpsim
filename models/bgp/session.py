@@ -7,6 +7,7 @@ from .route import BGPRoute
 
 if TYPE_CHECKING:
     from ..router import Router
+    from ..world import WorldClock
 
 
 @dataclass
@@ -117,17 +118,38 @@ class BGPSessionManager:
                 sessions.append(self.create(a, b))
         return sessions
 
-    def update_sessions_state(self) -> None:
-        """Check if sessions are still up, and update
+    def update_sessions_state(self, clock: WorldClock | None = None) -> None:
+        """Evaluate if peers are reachable
 
-        The state may change due to link state changes
+        A session is up if the peer endpoint is reachable.
+        If a clock is supplied, record session up/down transitions to the timeline.
         """
         for session in self.sessions:
             is_still_up = (
                 session.router_a.can_reach(session.endpoint_b)
                 and session.router_b.can_reach(session.endpoint_a)
             )
-            if session.is_up and not is_still_up:
+            was_up = session.is_up
+            if was_up and not is_still_up:
                 session.adj_rib_a.clear()
                 session.adj_rib_b.clear()
             session.is_up = is_still_up
+
+            if clock is not None and was_up != is_still_up:
+                self._record_adjacency(session, is_up=is_still_up, clock=clock)
+
+    def _record_adjacency(self, session: BGPSession, is_up: bool, clock: WorldClock) -> None:
+        """Emits world events for session up/down transitions"""
+        for router in (session.router_a, session.router_b):
+            peer = session.router_b if router is session.router_a else session.router_a
+            peer_ip = session.remote_endpoint(router)
+            if is_up:
+                clock.record(
+                    f"{router.name}'s session with {peer.name} came up",
+                    f"%BGP-5-ADJCHANGE: neighbor {peer_ip} Up",
+                )
+            else:
+                clock.record(
+                    f"{router.name}'s session with {peer.name} went down",
+                    f"%BGP-5-ADJCHANGE: neighbor {peer_ip} Down Peer unreachable",
+                )
