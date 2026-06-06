@@ -72,7 +72,7 @@ class BGPEngine:
         """
         route = BGPRoute(
             prefix=network,
-            next_hop=IPv4Address("0.0.0.0"), # TODO: advertise network learned somewhere else
+            next_hop=IPv4Address("0.0.0.0"),
             source=BGPRouteSource(type=BGPRouteSourceType.LOCAL)
         )
         self.loc_rib[network] = route
@@ -168,7 +168,7 @@ class BGPEngine:
                 if session.is_ebgp:
                     out_route.as_path = [self.asn] + out_route.as_path
                     out_route.next_hop = session.local_endpoint(self.router)
-                elif peer_info.next_hop_self:
+                elif peer_info.next_hop_self or route.source.type is BGPRouteSourceType.LOCAL:
                     out_route.next_hop = session.local_endpoint(self.router)
 
                 peer_info.adj_rib_out.append(out_route)
