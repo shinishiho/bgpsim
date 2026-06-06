@@ -211,10 +211,9 @@ class Router:
         peer = entry.interface.link.get_peer_of(self) # type: ignore (pkt to loopback should have arrived)
         return peer.forward(packet)
 
-    def process_packet(self, packet: Packet) -> str:
+    def process_packet(self, packet: Packet) -> None:
         """Do something with the received packet"""
-        print(f"{self.name} received a packet: {packet}")
-        pass
+        print(f"{self.name} says: Hey, I received a packet from {packet.src}: {packet.payload}")
 
 class RouterManager:
     """Router Manager class
@@ -225,7 +224,7 @@ class RouterManager:
     def __init__(self):
         self.routers: list[Router] = []
 
-    def create(self):
+    def create(self) -> Router:
         """Create a router with default name R{N}"""
 
         router = Router(name=f"R{len(self.routers) + 1}")

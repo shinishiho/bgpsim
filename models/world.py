@@ -51,7 +51,7 @@ class World:
                 return ticks - 1  # the last (empty) tick did no work
         raise RuntimeError(f"No convergence within {max_ticks} ticks")
 
-    def build_ibgp_mesh(self, asn: int = 1) -> list:
+    def build_ibgp_mesh(self, asn: int = 1) -> list[BGPSession]:
         """Create a full iBGP mesh for every router in `asn`.
 
         Get all routers in `asn` and send them to the BGPSessionManager
@@ -84,7 +84,7 @@ class World:
             )
         return link
 
-    def add_loopback(self, router: Router) -> "Interface":
+    def add_loopback(self, router: Router) -> Interface:
         """Add a loopback interface to `router` (a /32 from the loopback pool)"""
         network = self.links.alloc_loopback()
         iface = router.add_loopback(network)
@@ -209,11 +209,11 @@ class WorldClock:
         self.events: list[WorldEvent] = []  # append-only timeline
         self.cursor: int              = -1  # playback position; -1 = before first event
 
-    def record(self, english_message: str, technical_message: str) -> "WorldEvent":
+    def record(self, english_message: str, technical_message: str) -> WorldEvent:
         """Record a world event
         
         Keyword arguments:
-        english_message: a natural lanaguage description of the event, for narration purposes
+        english_message: a natural language description of the event, for narration purposes
         technical_message: a Cisco-style syslog message, or configuration command
         """
         event = WorldEvent(english_message, technical_message, tick=self.now)

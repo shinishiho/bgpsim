@@ -1,5 +1,5 @@
 from collections import deque
-from typing import Iterator, List
+from collections.abc import Iterator
 from ipaddress import IPv4Network, IPv4Address
 
 from .router import Router, Interface
@@ -7,8 +7,8 @@ from .router import Router, Interface
 
 class Link:
     """Physical cable between two routers.
-    
-    Keeps track of its two endpoint
+
+    Keeps track of its two endpoints
     """
 
     def __init__(
@@ -66,12 +66,12 @@ class Link:
 class LinkManager:
     """Link Manager class
 
-    Manages every link in the world, plus the address pools (the /24 link pool
-    and the /32 loopback pool).
+    Manages every link in the world, plus the address pools
+    (the /24 network address pool and the /32 loopback address pool).
     """
 
     def __init__(self):
-        self.links: List[Link] = []
+        self.links: list[Link] = []
         self.local_pool: Iterator[IPv4Network] = IPv4Network("192.168.0.0/16").subnets(prefixlen_diff=8)
         self.local_pool_freed: deque[IPv4Network] = deque()
         self.loopback_pool: Iterator[IPv4Network] = IPv4Network("10.0.0.0/24").subnets(prefixlen_diff=8)

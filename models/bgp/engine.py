@@ -8,7 +8,7 @@ from ..routing_table import Route, RouteType
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..router import Router
+    from ..router import Router, Interface
     from ..world import WorldClock
 
 @dataclass
@@ -91,15 +91,6 @@ class BGPEngine:
         """Withdraw a network from BGP"""
         self.manual_rib.pop(network, None)
         self.loc_rib.pop(network, None)
-
-    def update(
-        self,
-        clock: WorldClock | None = None,
-    ) -> None:
-        """TODO: check and clean up
-        """
-        self.compute(clock)
-        self.commit(clock)
 
     def compute(
         self,
@@ -235,7 +226,7 @@ class BGPEngine:
         self,
         old_loc_rib: dict[IPv4Network, BGPRoute],
         new_loc_rib: dict[IPv4Network, BGPRoute],
-        clock: "WorldClock",
+        clock: WorldClock,
     ) -> None:
         """Narrate how this pass changed loc_rib onto the timeline.
 
@@ -243,11 +234,11 @@ class BGPEngine:
         same attributes is (correctly) not reported as a change.
         """
         def identity(route: BGPRoute):
-            return (route.next_hop, tuple(route.as_path), route.local_pref, route.weight)
+            return (route.next_hop, tuple(route.as_path), route.local_pref, route.med, route.weight)
 
         def detail(route: BGPRoute) -> str:
             return (f"next_hop={route.next_hop} as_path={route.as_path} "
-                    f"local_pref={route.local_pref} weight={route.weight}")
+                    f"local_pref={route.local_pref} med={route.med} weight={route.weight}")
 
         name = self.router.name
         for prefix, route in new_loc_rib.items():
@@ -269,7 +260,7 @@ class BGPEngine:
                     f"loc_rib[{prefix}] removed",
                 )
 
-    def _find_egress_interface(self, next_hop: IPv4Address):
+    def _find_egress_interface(self, next_hop: IPv4Address) -> Interface | None:
         """Find the egress interface to reach the next hop
 
         Recursively look up the next hop in the routing table, until a directly
