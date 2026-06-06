@@ -139,9 +139,31 @@ class World:
             f"no network {network.network_address} mask {network.netmask}",
         )
 
+    def cut_link(self, router_a: Router, router_b: Router) -> None:
+        """Shark eats cable"""
+        link = router_a.get_link_to(router_b)
+        link.down()
+        for router in (router_a, router_b):
+            ifname = router.interface_name(link)
+            self.clock.record(
+                f"{router.name}'s {ifname} went down (cable cut)",
+                f"%LINK-3-UPDOWN: Interface {ifname}, changed state to down",
+            )
+
+    def repair_link(self, router_a: Router, router_b: Router) -> None:
+        """Human fixes cable"""
+        link = router_a.get_link_to(router_b)
+        link.up()
+        for router in (router_a, router_b):
+            ifname = router.interface_name(link)
+            self.clock.record(
+                f"{router.name}'s {ifname} came back up (cable repaired)",
+                f"%LINK-3-UPDOWN: Interface {ifname}, changed state to up",
+            )
+
     def destroy_link(self, router_a: Router, router_b: Router) -> None:
         """Pull the cable between two routers and disconnect them for good
-        
+
         Different from shutdown(), a soft state change,
         or down() on the link, a broken cable that can be repaired.
         """
