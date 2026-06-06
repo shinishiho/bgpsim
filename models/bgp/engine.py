@@ -51,15 +51,21 @@ class BGPEngine:
                 route.local_pref,
                 route.source.type == BGPRouteSourceType.LOCAL,
                 -len(route.as_path),
-                # lowest origin?
-                -route.med if route.med is not None else 0,
-                # igp metric?
-                # lowest bgp router-id?
+                # origin: no IGP in this sim, so every route is IGP-origin
+                -(route.med if route.med is not None else 0),    # lowest MED (missing = 0)
+                route.source.type == BGPRouteSourceType.EBGP,    # eBGP over iBGP
+                # IGP metric to next-hop: # TODO: use link cost?
+                -int(self._advertiser_router_id(route)),         # lowest router-id
             ),
             reverse=True
         )
 
         return candidates[0]
+
+    def _advertiser_router_id(self, route: BGPRoute) -> IPv4Address:
+        """Router-id of the peer that advertised `route` (self for LOCAL routes)."""
+        router = route.source.router or self.router
+        return router.router_id
 
     def advertise_route(
         self,

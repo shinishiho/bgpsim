@@ -73,6 +73,18 @@ class Router:
         self.routing_table: RoutingTable = RoutingTable()
         self.bgp_engine: BGPEngine = BGPEngine(router=self)
 
+    @property
+    def router_id(self) -> IPv4Address:
+        """Cisco-style BGP router-id: highest loopback IP, else highest physical IP.
+
+        Falls back to 0.0.0.0 when the router has no interfaces yet, so the
+        best-path router-id tiebreaker never crashes on a bare router.
+        """
+        loopbacks = [iface.ip for iface in self.interfaces.values() if iface.is_loopback]
+        physical  = [iface.ip for iface in self.interfaces.values() if not iface.is_loopback]
+        pool = loopbacks or physical
+        return max(pool) if pool else IPv4Address("0.0.0.0")
+
     def add_interface(self, link: Link) -> Interface:
         """Attach a physical interface on `link` and install its connected route
         
