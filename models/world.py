@@ -62,9 +62,9 @@ class World:
             self._record_session(session)
         return sessions
 
-    def add_router(self, asn: int = 1) -> Router:
-        """Add a router to the world"""
-        router = self.routers.create()
+    def add_router(self, asn: int = 1, name: str | None = None) -> Router:
+        """Add a router to the world (auto-named R{N} when name is None)"""
+        router = self.routers.create(name=name)
         router.bgp_engine.asn = asn
         self.clock.record(
             f"{router.name} came online in AS{asn}",

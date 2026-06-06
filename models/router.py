@@ -224,10 +224,10 @@ class RouterManager:
     def __init__(self):
         self.routers: list[Router] = []
 
-    def create(self) -> Router:
-        """Create a router with default name R{N}"""
+    def create(self, name: str | None = None) -> Router:
+        """Create a router, defaulting to the name R{N} when none is given"""
 
-        router = Router(name=f"R{len(self.routers) + 1}")
+        router = Router(name=name or f"R{len(self.routers) + 1}")
         self.routers.append(router)
 
         return router
