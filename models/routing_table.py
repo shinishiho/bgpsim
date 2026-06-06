@@ -4,7 +4,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .link import Link
+    from .router import Interface
 
 class RouteType(Enum):
     DIRECT = 0
@@ -16,7 +16,7 @@ class RouteType(Enum):
 class Route:
     """An entry in a router's routing table"""
     network: IPv4Network
-    link: Link
+    interface: Interface
     route_type: RouteType
     next_hop: IPv4Address | None = None
 

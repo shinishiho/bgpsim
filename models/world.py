@@ -7,7 +7,7 @@ from .bgp.session import BGPSessionManager
 
 if TYPE_CHECKING:
     from ipaddress import IPv4Address
-    from .router import Router
+    from .router import Router, Interface
     from .link import Link
     from .bgp.session import BGPSession
 
@@ -64,10 +64,9 @@ class World:
         return router
 
     def connect(self, router_a: Router, router_b: Router, cost: int = 10) -> Link:
-        """Connect two routers with a cable (or add a loopback when a is b)"""
+        """Connect two routers with a cable"""
         link = self.links.create(router_a, router_b, cost)
-        endpoints = [router_a] if router_a is router_b else [router_a, router_b]
-        for router in endpoints:
+        for router in (router_a, router_b):
             ifname = router.interface_name(link)
             ip = link.get_ip(router)
             self.clock.record(
@@ -75,6 +74,40 @@ class World:
                 f"interface {ifname}\n ip address {ip} {link.network.netmask}\n no shutdown",
             )
         return link
+
+    def add_loopback(self, router: Router) -> "Interface":
+        """Add a loopback interface to `router` (a /32 from the loopback pool)"""
+        network = self.links.alloc_loopback()
+        iface = router.add_loopback(network)
+        self.clock.record(
+            f"{router.name}'s {iface.name} came up at {iface.ip}/32",
+            f"interface {iface.name}\n ip address {iface.ip} {network.netmask}\n no shutdown",
+        )
+        return iface
+
+    def shutdown(self, router: Router, peer: Router) -> None:
+        """Router's interface admin-down
+
+        Note: by Cisco, it should take the interface name as argument, but here we
+        specify two routers for convenience, the function will find the interface between them.
+        """
+        link = router.get_link_to(peer)
+        ifname = router.interface_name(link)
+        router.interfaces[ifname].shutdown()
+        self.clock.record(
+            f"{router.name} shut down {ifname}",
+            f"interface {ifname}\n shutdown",
+        )
+
+    def no_shutdown(self, router: Router, peer: Router) -> None:
+        """Router's interface admin-up"""
+        link = router.get_link_to(peer)
+        ifname = router.interface_name(link)
+        router.interfaces[ifname].no_shutdown()
+        self.clock.record(
+            f"{router.name} brought up {ifname}",
+            f"interface {ifname}\n no shutdown",
+        )
 
     def peer(
         self,
@@ -107,20 +140,20 @@ class World:
         )
 
     def destroy_link(self, router_a: Router, router_b: Router) -> None:
-        """Take a link down and record the interface shutdowns.
-
-        # TODO: Interface-centric
+        """Pull the cable between two routers and disconnect them for good
+        
+        Different from shutdown(), a soft state change,
+        or down() on the link, a broken cable that can be repaired.
         """
         link = router_a.get_link_to(router_b)
-        endpoints = [router_a] if router_a is router_b else [router_a, router_b]
-        shutdowns = [(router, router.interface_name(link)) for router in endpoints]
+        removed = [(router, router.interface_name(link)) for router in (router_a, router_b)]
 
         self.links.destroy(router_a, router_b)
 
-        for router, ifname in shutdowns:
+        for router, ifname in removed:
             self.clock.record(
-                f"{router.name} shut down {ifname}",
-                f"interface {ifname}\n shutdown",
+                f"{router.name} lost {ifname} (cable pulled)",
+                f"%LINK-3-UPDOWN: Interface {ifname}, changed state to down",
             )
 
     def _record_session(self, session: BGPSession) -> None:

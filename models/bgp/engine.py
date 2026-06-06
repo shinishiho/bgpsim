@@ -214,11 +214,12 @@ class BGPEngine:
                     f"loc_rib[{prefix}] removed",
                 )
 
-    def _find_next_hop_link(self, next_hop: IPv4Address):
-        """Find the link to reach the next hop
+    def _find_egress_interface(self, next_hop: IPv4Address):
+        """Find the egress interface to reach the next hop
 
-        Recursively look up the next hop in the routing table, until directly connected link is found.
-        Return None if not found or route is not valid (e.g. next hop is not reachable).
+        Recursively look up the next hop in the routing table, until a directly
+        connected interface is found. Return None if not found or the route is not
+        valid (e.g. the next hop is not reachable).
 
         Keyword arguments:
         next_hop: the IP address of the next hop
@@ -227,10 +228,10 @@ class BGPEngine:
         seen: set[IPv4Address] = set()
         while addr not in seen:
             seen.add(addr)
-            # Base case: directly connected, link is found
-            for link, _ip in self.router.interfaces:
-                if addr in link.network:
-                    return link
+            # Base case: directly connected
+            for iface in self.router.interfaces.values():
+                if iface.link is not None and addr in iface.link.network:
+                    return iface
             # Find the next hop in the underlay routes
             entry = self.router.routing_table.lookup(addr, exclude_route_type=RouteType.BGP)
             if entry is None or entry.next_hop is None:
@@ -245,13 +246,13 @@ class BGPEngine:
         for prefix, route in self.loc_rib.items():
             if route.source.type is BGPRouteSourceType.LOCAL:
                 continue
-            link = self._find_next_hop_link(route.next_hop)
-            if link is None: # Unreachable
+            iface = self._find_egress_interface(route.next_hop)
+            if iface is None: # Unreachable
                 continue
             self.router.routing_table.add(
                 Route(
                     network=prefix,
-                    link=link,
+                    interface=iface,
                     next_hop=route.next_hop,
                     route_type=RouteType.BGP,
                 )

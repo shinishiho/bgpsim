@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network
 
 from .routing_table import Route, RouteType, RoutingTable
@@ -7,6 +8,52 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .link import Link
+
+
+@dataclass
+class Interface:
+    """A router's interface
+    
+    It is attached to a Link (or None, for a loopback), contains an IP address and a network
+    """
+
+    router: Router # Back reference
+    name: str
+    ip: IPv4Address
+    link: Link | None = None
+    is_admin_up: bool = True # Cisco `shutdown`/`no shutdown`
+
+    @property
+    def network(self) -> IPv4Network:
+        """The subnet on this interface.
+
+        Derived, not stored: a physical interface shares its link's subnet (the
+        Link owns it), and a loopback is always a /32 around its own address.
+        """
+        if self.link is not None:
+            return self.link.network
+        return IPv4Network(f"{self.ip}/32")
+
+    @property
+    def is_loopback(self) -> bool:
+        return self.link is None
+
+    @property
+    def is_up_up(self) -> bool:
+        """Depends on link state (if not loopback) and admin state
+        Operational (up/up) if link is not broken and interface is not shutdown
+        """
+        if self.link is None:
+            return self.is_admin_up
+        return self.link.is_up # Which is both `is_admin_up` and `line_is_up` for the link
+
+    def shutdown(self) -> None:
+        """Admin-down this interface (`shutdown`)"""
+        self.is_admin_up = False
+
+    def no_shutdown(self) -> None:
+        """Admin-up this interface (`no shutdown`)"""
+        self.is_admin_up = True
 
 
 class Router:
@@ -20,28 +67,67 @@ class Router:
         name: str
     ):
         self.name = name
-        self.interfaces: list[tuple[Link, IPv4Address]] = []
+        self.interfaces: dict[str, Interface] = {}
+        self._eth_next: int = 0
+        self._lo_next:  int = 0
         self.routing_table: RoutingTable = RoutingTable()
         self.bgp_engine: BGPEngine = BGPEngine(router=self)
 
-    def add_interface(self, link: Link) -> None:
-        ip = link.get_ip(self)
-        if ip is None:
-            raise ValueError(f"{self.name} is not connected to {link.network}")
+    def add_interface(self, link: Link) -> Interface:
+        """Attach a physical interface on `link` and install its connected route
+        
+        Note: it should be called in pair with the other router
+        """
+        # The first interface on a link takes .1, the second takes .2
+        ip = list(link.network.hosts())[len(link.interfaces)]
 
-        self.interfaces.append((link, ip))
+        # TODO: reuse destroyed interfaces name?
+        name = f"GigabitEthernet0/{self._eth_next}"
+        self._eth_next += 1
+
+        iface = Interface(router=self, name=name, ip=ip, link=link)
+        self.interfaces[name] = iface
+        link.interfaces.append(iface)
         self.routing_table.add(
             Route(
                 network=link.network,
-                link=link,
+                interface=iface,
                 next_hop=None,
                 route_type=RouteType.DIRECT
             )
         )
+        return iface
+
+    def add_loopback(self, network: IPv4Network) -> Interface:
+        """Add a virtual loopback interface (no cable) and its connected /32 route"""
+        ip = list(network.hosts())[0]
+        # TODO: reuse destroyed interfaces name?
+        name = f"Loopback{self._lo_next}"
+        self._lo_next += 1
+
+        iface = Interface(router=self, name=name, ip=ip, link=None)
+        self.interfaces[name] = iface
+        self.routing_table.add(
+            Route(
+                network=network,
+                interface=iface,
+                next_hop=None,
+                route_type=RouteType.DIRECT
+            )
+        )
+        return iface
 
     def remove_interface(self, link: Link) -> None:
-       self.interfaces = [(l, ip) for l, ip in self.interfaces if l is not link]
-       self.routing_table.remove(link.network)
+        """Detach the interface on `link` and remove its connected route
+        
+        Note: it should be called in pair with the other router
+        """
+        name = next((n for n, iface in self.interfaces.items() if iface.link is link), None)
+        if name is not None:
+            iface = self.interfaces.pop(name)
+            if iface in link.interfaces:
+                link.interfaces.remove(iface)
+        self.routing_table.remove(link.network)
 
     def add_static_route(self, network: IPv4Network, next_hop: IPv4Address) -> None:
         """Add a static route to the routing table
@@ -51,12 +137,12 @@ class Router:
         next_hop: next hop IP address
         """
         # That said, there should be only one link. It's a lazy way to find the link
-        for link, ip in self.interfaces:
-            if next_hop in link.network:
+        for iface in self.interfaces.values():
+            if iface.link is not None and next_hop in iface.network:
                 self.routing_table.add(
                     Route(
                         network=network,
-                        link=link,
+                        interface=iface,
                         next_hop=next_hop,
                         route_type=RouteType.STATIC
                     )
@@ -66,43 +152,37 @@ class Router:
         raise ValueError(f"{self.name} says: What is {next_hop} even")
 
     def interface_name(self, link: Link) -> str:
-        """Cisco-style name for this router's interface on `link`.
-
-        Physical links become GigabitEthernet0/N, loopbacks become LoopbackN,
-        numbered per-kind in the order the interfaces were attached.
-        """
-        is_loopback = link.get_peer_of(self) is self
-        index = 0
-        for attached, _ip in self.interfaces:
-            if (attached.get_peer_of(self) is self) != is_loopback:
-                continue
-            if attached is link:
-                break
-            index += 1
-        return f"Loopback{index}" if is_loopback else f"GigabitEthernet0/{index}"
+        """Cisco-style name of this router's interface on `link` (assigned at attach time)"""
+        for iface in self.interfaces.values():
+            if iface.link is link:
+                return iface.name
+        raise ValueError(f"{self.name} has no interface on {link.network}")
 
     def get_link_to(self, router: Router) -> Link:
         """Find the link to a router"""
-        for link, ip in self.interfaces:
-            if link.get_peer_of(self) == router:
-                return link
+        for iface in self.interfaces.values():
+            if iface.link is not None and iface.link.get_peer_of(self) == router:
+                return iface.link
         raise ValueError(f"{self.name} has no link to {router.name}")
 
     def has_link_to(self, router: Router) -> bool:
         """Check if this router has a link to a router"""
-        return any(link.get_peer_of(self) == router for link, ip in self.interfaces)
+        return any(
+            iface.link is not None and iface.link.get_peer_of(self) == router
+            for iface in self.interfaces.values()
+        )
 
     def can_reach(self, addr: IPv4Address) -> bool:
         """Is it just as simple as looking up the routing table?"""
         entry = self.routing_table.lookup(addr)
-        return entry is not None and entry.link.state_is_up
+        return entry is not None and entry.interface.is_up_up
 
     def forward(self, packet: Packet) -> str:
         """Send the packet to the next hop"""
         packet.hops.append(self.name)
         packet.ttl -= 1
 
-        if packet.dst in [ip for link, ip in self.interfaces]:
+        if packet.dst in [iface.ip for iface in self.interfaces.values()]:
             self.process_packet(packet)
             return f"Finally arrived at {self.name}"
 
@@ -113,10 +193,10 @@ class Router:
         if entry is None:
             return f"{self.name} doesn't know how to route to {packet.dst}"
 
-        peer = entry.link.get_peer_of(self)
-        if not entry.link.state_is_up:
-            return f"The link between {self.name} and {peer.name} is down"
+        if not entry.interface.is_up_up:
+            return f"{self.name}'s {entry.interface.name} is down"
 
+        peer = entry.interface.link.get_peer_of(self) # type: ignore (pkt to loopback should have arrived)
         return peer.forward(packet)
 
     def process_packet(self, packet: Packet) -> str:
