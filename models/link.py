@@ -116,7 +116,7 @@ class LinkManager:
         """Create a physical link (cable) between two distinct routers.
 
         Gets a /24 network from the available pool 192.168.0.0/16. A loopback is
-        not a link -- use World.add_loopback / Router.add_loopback for those.
+        not a link -- use World.create_loopback / Router.add_loopback for those.
 
         Keyword arguments:
         router_a: the first router
@@ -124,7 +124,7 @@ class LinkManager:
         """
 
         if router_a is router_b:
-            raise ValueError("a loopback is not a link; use World.add_loopback")
+            raise ValueError("a loopback is not a link; use World.create_loopback")
 
         if router_a.has_link_to(router_b):
             raise ValueError("So I don't want to allow multiple links between two routers")

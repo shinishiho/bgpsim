@@ -25,7 +25,7 @@ class World:
         self.bgp_sessions: BGPSessionManager = BGPSessionManager()
         self.clock:        WorldClock        = WorldClock()
 
-    def tick(self) -> list[WorldEvent]:
+    def step(self) -> list[WorldEvent]:
         """Advance the simulation one round.
 
         Check for BGP session state changes, then run BGP engines in two phases.
@@ -47,7 +47,7 @@ class World:
     def converge(self, max_ticks: int = 256) -> int:
         """Tick continuously until no more updates. Return the number of ticks elapsed."""
         for ticks in range(1, max_ticks + 1):
-            if not self.tick():
+            if not self.step():
                 return ticks - 1  # the last (empty) tick did no work
         raise RuntimeError(f"No convergence within {max_ticks} ticks")
 
@@ -62,7 +62,7 @@ class World:
             self._record_session(session)
         return sessions
 
-    def add_router(self, asn: int = 1, name: str | None = None) -> Router:
+    def create_router(self, name: str | None = None, asn: int = 1) -> Router:
         """Add a router to the world (auto-named R{N} when name is None)"""
         router = self.routers.create(name=name)
         router.bgp_engine.asn = asn
@@ -72,7 +72,7 @@ class World:
         )
         return router
 
-    def connect(self, router_a: Router, router_b: Router, cost: int = 10) -> Link:
+    def create_link(self, router_a: Router, router_b: Router, cost: int = 10) -> Link:
         """Connect two routers with a cable"""
         link = self.links.create(router_a, router_b, cost)
         for router in (router_a, router_b):
@@ -84,7 +84,7 @@ class World:
             )
         return link
 
-    def add_loopback(self, router: Router) -> Interface:
+    def create_loopback(self, router: Router) -> Interface:
         """Add a loopback interface to `router` (a /32 from the loopback pool)"""
         network = self.links.alloc_loopback()
         iface = router.add_loopback(network)
@@ -118,7 +118,7 @@ class World:
             f"interface {ifname}\n no shutdown",
         )
 
-    def peer(
+    def create_bgp_session(
         self,
         router_a: Router,
         router_b: Router,
