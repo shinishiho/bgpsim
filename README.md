@@ -4,21 +4,28 @@ A simple BGP Simulator written in Python. Targets networking beginners and enthu
 
 ## Features
 
-### Backbone
+- Built with [Textual](https://github.com/textualize/textual) -- fully functional TUI.
+- Beginner-friendly design and commands.
+- Tick-based -- events are recorded each tick (timestep), including link state change, BGP update, etc.
 
-- Language: Python
-- Interface: Terminal, JSON (for API/WebUI)
-- Simulator: tick-based, event-based
+## Assumption/Abstraction
 
-#### Classes
+- All routers speak BGP (eBGP or iBGP full-mesh). By default, they are assigned to AS 1.
+- One network consists of only two routers.
+By default, it will create a /24 network within `192.168.0.0/16`, and routers will have `.1` and `.2` address.
+- Loopback interfaces use `/32` subnets of `10.0.0.0/24`.
+- Cisco attributes and defaults.
 
-- World: contains routers, links, BGP sessions, prefixes, policies, timer
-- Router: name(str), asn(int)
-- Link: router1(router), router2(router), cost(int), state(bool)
-- BGP session: localRouter(router), peerRouter(router), type("eBGP","iBGP"), holdTime(int), keepAliveTime(int), importPolicies(policy[]), exportPolicies(policy[]), nextHopSelf(bool), enabled(bool)
-- BGP route: prefix(str,ip-like), nextHop(str,ip-like), origin(IGP,EGP,INCOMPLETE), asPath(int[]), localPref(int), med(int), source.type(local,iBGP,eBGP), source.router(router), source.session(session)
-- BGP state: router(router), adjRibIn(<session,route[]>), locRib(<session,route>), adjRibOut(<session,route[]>)
-- BGP message: one of OpenMessage, KeepAliveMessage, UpdateMessage, NotificationMessage
+## Limitations
 
-## Structure
+- Only IPv4 is supported.
+- No redistribution since there is no other IGP.
+- No import/export policies.
+- No route deflectors, confederations.
+
+## Acknowledgment
+
+- Networklessons.com for beautifully laid out lectures about BGP basics, mechanisms, attributes, etc.
+(that said, access is limited pass chapter 1, since I'm not a member).
+- Claude contributes ~50% of the code, mainly including refactors, logic bug fix, realistic BGP compliance, UI, etc.
 
