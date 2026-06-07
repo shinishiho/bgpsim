@@ -1,0 +1,204 @@
+Screen {
+  layers: base popup;
+}
+
+#body {
+  height: 1fr;
+}
+
+#timeline_panel {
+  width: 40;
+  height: 100%;
+  border-right: solid $primary;
+}
+
+#timeline_panel > Static {
+  text-align: center;
+  width: 100%;
+}
+
+#timeline_panel.-hidden {
+  display: none;
+}
+
+#playhead_controls {
+  width: 100%;
+  height: auto;
+  align: center middle;
+}
+
+#playhead_controls Button {
+  min-width: 0;
+  width: 6;
+  height: 3;
+  margin: 0;
+  padding: 0;
+}
+
+#playhead_controls #playhead_tick {
+  width: auto;
+  height: 3;
+  margin: 0 1;
+  content-align: center middle;
+}
+
+#inspector_panel {
+  width: 40;
+  height: 100%;
+  border-left: solid $primary;
+}
+
+#inspector_panel > Static {
+  text-align: center;
+  width: 100%;
+}
+
+#inspector_panel.-hidden {
+  display: none;
+}
+
+#center {
+  width: 1fr;
+  height: 100%;
+}
+
+#topology {
+  height: 1fr;
+  width: 100%;
+  border: round $primary;
+  border-title-align: center;
+  padding: 0 1;
+  overflow: auto;
+}
+
+#history_row {
+  width: 100%;
+  height: auto;
+}
+
+#main {
+  width: 1fr;
+  height: 12;
+  border: round $primary;
+  border-title-align: center;
+}
+
+#main.-hidden {
+  display: none;
+}
+
+#legend_panel {
+  width: 24;
+  height: 12;
+  border: round $primary;
+  border-title-align: center;
+  padding: 0 1;
+}
+
+#legend_panel.-hidden {
+  display: none;
+}
+
+#legend_panel.-floating {
+  layer: popup;
+  background: $surface;
+}
+
+#main > Tabs #tabs-list {
+  width: 100%;
+  align-horizontal: center;
+}
+
+#bottom_bar {
+  dock: bottom;
+  height: auto;
+}
+
+#command_row {
+  height: auto;
+}
+
+#command {
+  width: 1fr;
+  height: 3;
+}
+
+#clear_history {
+  min-width: 0;
+  width: 6;
+  height: 3;
+  margin: 0;
+  padding: 0;
+  content-align: center middle;
+  text-align: center;
+  border: tall $border-blurred;
+}
+
+.-narrow #timeline_panel,
+.-narrow #inspector_panel {
+  width: 24;
+}
+
+.-narrow #playhead_controls Button {
+  width: 4;
+  height: 1;
+  border: none;
+}
+
+#playhead_tick_small {
+  display: none;
+  width: auto;
+  height: 1;
+  margin: 0 1;
+  content-align: center middle;
+}
+
+.-narrow #playhead_tick {
+  display: none;
+}
+
+.-narrow #playhead_tick_small {
+  display: block;
+}
+
+.-short #command {
+  height: 1;
+  border: none;
+}
+
+.-short #clear_history {
+  height: 1;
+  border: none;
+}
+
+.-too-small {
+  overflow: hidden;
+}
+
+.-too-small #body,
+.-too-small #bottom_bar {
+  display: none;
+}
+
+#too_small_overlay {
+  layer: popup;
+  display: none;
+  width: 100%;
+  height: 100%;
+  align: center middle;
+  background: $background 85%;
+}
+
+#too_small_overlay.-show {
+  display: block;
+}
+
+#too_small_dialog {
+  width: auto;
+  height: auto;
+  padding: 1 3;
+  border: thick $error;
+  background: $surface;
+  color: $text;
+  text-align: center;
+}
