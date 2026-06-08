@@ -164,12 +164,23 @@ class World:
         for side in session.sides.values():
             router, peer, peer_ip, remote_as = side.router, side.peer, side.peer_ip, side.remote_as
             kind = "eBGP" if session.is_ebgp else "iBGP"
+            multihop = not router.has_link_to(peer)
+            src_if = next(
+                (i.name for i in router.interfaces.values() if i.ip == side.self_ip), None
+            )
+            cisco = f"router bgp {router.bgp_engine.asn}\n neighbor {peer_ip} remote-as {remote_as}"
+            if multihop and src_if is not None:
+                # iBGP already rides TTL 255; only eBGP needs ebgp-multihop to clear it.
+                cisco += f"\n neighbor {peer_ip} update-source {src_if}"
+                if session.is_ebgp:
+                    cisco += f"\n neighbor {peer_ip} ebgp-multihop 255"
             self.clock.record(
                 "bgp",
-                f"{router.name}→{peer.name} {kind}",
+                f"{router.name}→{peer.name} {kind}" + (" (multihop)" if multihop else ""),
                 f"`{router.name}` opened an **{kind}** session to "
-                f"`{peer.name}` (`{peer_ip}`, AS{remote_as})",
-                f"router bgp {router.bgp_engine.asn}\n neighbor {peer_ip} remote-as {remote_as}",
+                f"`{peer.name}` (`{peer_ip}`, AS{remote_as})"
+                + (f", multihop via `{src_if}`" if multihop and src_if else ""),
+                cisco,
             )
 
     def advertise(self, router: Router, network: IPv4Network) -> None:

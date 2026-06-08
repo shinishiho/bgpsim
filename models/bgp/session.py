@@ -115,19 +115,34 @@ class BGPSessionManager:
     def build_ibgp_mesh(self, routers: list[Router]) -> list[BGPSession]:
         """Create iBGP sessions for every pair in `routers` that doesn't have one yet.
 
-        Since there's no IGP in this model, all iBGP peers must have a direct link between them.
+        The BGP peers should be reachable from each other in order to create a mesh.
+        In this simulator, since there's no IGP available, the user must either connect
+        the routers with a cable, or ensure they're reachable via static routes.
         """
         needed = [
             (a, b) for a, b in combinations(routers, 2)
             if not any(set(s.sides) == {a, b} for s in self.sessions)
         ]
-        missing = [(a, b) for a, b in needed if not a.has_link_to(b)]
-        if missing:
-            pairs = ", ".join(f"{a.name}-{b.name}" for a, b in missing)
+
+        plan: list[tuple[Router, Router, IPv4Address | None, IPv4Address | None]] = []
+        unreachable: list[str] = []
+        for a, b in needed:
+            if a.has_link_to(b):
+                plan.append((a, b, None, None))  # single-hop, sourced from the link
+                continue
+            ep_a, ep_b = a.router_id, b.router_id
+            if a.can_reach(ep_b) and b.can_reach(ep_a):
+                plan.append((a, b, ep_a, ep_b))  # multihop over reachable addresses
+            else:
+                unreachable.append(f"{a.name}-{b.name}")
+
+        if unreachable:
             raise ValueError(
-                f"iBGP mesh needs a direct link between every pair; missing: {pairs}"
+                "iBGP mesh needs every router pair to be reachable from each other: "
+                + ", ".join(unreachable)
+                + ". Hint: try connecting the routers with a cable or add a static route."
             )
-        return [self.create(a, b) for a, b in needed]
+        return [self.create(a, b, ep_a, ep_b) for a, b, ep_a, ep_b in plan]
 
     def update_sessions_state(self, clock: WorldClock | None = None) -> None:
         """Evaluate if peers are reachable
