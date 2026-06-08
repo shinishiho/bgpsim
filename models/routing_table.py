@@ -31,7 +31,6 @@ class RoutingTable:
         Taking Administrative Distance into consideration. The lowest AD wins;
         an equal-or-better AD replaces the existing route for that network.
         """
-
         existing = [r for r in self.routes if r.network == entry.network]
         if existing:
             best_ad = min(r.route_type.value for r in existing)

@@ -226,7 +226,6 @@ class RouterManager:
 
     def create(self, name: str | None = None) -> Router:
         """Create a router, defaulting to the name R{N} when none is given"""
-
         router = Router(name=name or f"R{len(self.routers) + 1}")
         self.routers.append(router)
 

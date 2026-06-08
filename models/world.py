@@ -30,7 +30,6 @@ class World:
     """The simulator world
 
     It holds everything: routers, links, BGP sessions, timers.
-    I'm considering if prefixes and policies should be handled by the world or localized.
     """
 
     def __init__(self):
@@ -118,6 +117,8 @@ class World:
     def shutdown(self, router: Router, peer: Router) -> None:
         """Router's interface admin-down
 
+        It will shutdown this router's interface towards the peer router.
+
         Note: by Cisco, it should take the interface name as argument, but here we
         specify two routers for convenience, the function will find the interface between them.
         """
@@ -132,7 +133,10 @@ class World:
         )
 
     def no_shutdown(self, router: Router, peer: Router) -> None:
-        """Router's interface admin-up"""
+        """Router's interface admin-up
+
+        It will active this router's interface towards the peer router.
+        """
         link = router.get_link_to(peer)
         ifname = router.interface_name(link)
         router.interfaces[ifname].no_shutdown()

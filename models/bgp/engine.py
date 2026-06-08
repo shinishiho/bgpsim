@@ -20,7 +20,6 @@ def _path_attrs(next_hop, as_path, local_pref=None, med=None) -> str:
     >>> _path_attrs("0.0.0.0", [], local_pref=100, med=50)
     'via `0.0.0.0`, as-path `i`, local-pref 100, MED 50'
     """
-
     path = " ".join(str(a) for a in as_path) or "i"
     parts = [f"via `{next_hop}`", f"as-path `{path}`"]
     if local_pref is not None:
@@ -69,7 +68,6 @@ class BGPEngine:
         → lowest IGP metric
         → lowest BGP router-id
         """
-
         candidates.sort(
             key=lambda route: (
                 route.weight,

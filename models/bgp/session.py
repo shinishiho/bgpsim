@@ -90,7 +90,6 @@ class BGPSessionManager:
         In single-hop BGP sessions, the endpoints are the direct link addresses.
         In multihop BGP sessions, the endpoints must be specified explicitly.
         """
-
         if (source_addr_a is None) != (source_addr_b is None):
             raise ValueError("provide both source_a and source_b, or neither")
 

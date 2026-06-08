@@ -122,7 +122,6 @@ class LinkManager:
         router_a: the first router
         router_b: the second router
         """
-
         if router_a is router_b:
             raise ValueError("a loopback is not a link; use World.create_loopback")
 
@@ -152,7 +151,6 @@ class LinkManager:
         router_a: the first router
         router_b: the second router
         """
-
         if router_a.has_link_to(router_b):
             link = router_a.get_link_to(router_b)
             self.links.remove(link)
