@@ -7,7 +7,8 @@ Screen {
 }
 
 #timeline_panel {
-  width: 40;
+  width: 20%;
+  min-width: 40;
   height: 100%;
   border-right: solid $primary;
 }
@@ -19,6 +20,14 @@ Screen {
 
 #timeline_panel.-hidden {
   display: none;
+}
+
+.timeline_event .event_config {
+  width: 1fr;
+  background: $panel;
+  color: $text-muted;
+  padding: 0 1;
+  margin-top: 1;
 }
 
 #playhead_controls {
@@ -43,7 +52,8 @@ Screen {
 }
 
 #inspector_panel {
-  width: 40;
+  width: 20%;
+  min-width: 40;
   height: 100%;
   border-left: solid $primary;
 }
@@ -62,7 +72,7 @@ Screen {
   height: 100%;
 }
 
-#topology {
+#topology_scroll {
   height: 1fr;
   width: 100%;
   border: round $primary;
@@ -71,14 +81,15 @@ Screen {
   overflow: auto;
 }
 
-#history_row {
-  width: 100%;
+#topology {
+  width: auto;
   height: auto;
 }
 
 #main {
-  width: 1fr;
-  height: 12;
+  width: 100%;
+  height: 25%;
+  min-height: 12;
   border: round $primary;
   border-title-align: center;
 }
@@ -87,26 +98,46 @@ Screen {
   display: none;
 }
 
-#legend_panel {
-  width: 24;
-  height: 12;
-  border: round $primary;
-  border-title-align: center;
+#cmd_list {
+  width: 32;
+  min-width: 16;
+  height: 100%;
+  border-right: solid $primary;
+  background: transparent;
+}
+
+#cmd_list > ListItem {
+  background: transparent;
   padding: 0 1;
 }
 
-#legend_panel.-hidden {
-  display: none;
+/* Keep the focused row visible: an ID selector outranks ListView's default
+   highlight rules, so restore them here or the highlight disappears. */
+#cmd_list > ListItem.-highlight {
+  background: $accent 50%;
 }
 
-#legend_panel.-floating {
-  layer: popup;
-  background: $surface;
+#cmd_list:focus > ListItem.-highlight {
+  background: $accent;
 }
 
-#main > Tabs #tabs-list {
-  width: 100%;
-  align-horizontal: center;
+#cmd_list > ListItem Label {
+  width: 1fr;
+  text-wrap: nowrap;
+  text-overflow: ellipsis;
+}
+
+#cmd_detail_scroll {
+  width: 1fr;
+  height: 100%;
+  padding: 0 1;
+}
+
+#legend {
+  width: 24;
+  height: 100%;
+  border-left: solid $primary;
+  padding: 0 1;
 }
 
 #bottom_bar {
@@ -136,7 +167,7 @@ Screen {
 
 .-narrow #timeline_panel,
 .-narrow #inspector_panel {
-  width: 24;
+  min-width: 24;
 }
 
 .-narrow #playhead_controls Button {
