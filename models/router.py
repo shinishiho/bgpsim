@@ -163,6 +163,11 @@ class Router:
 
         raise ValueError(f"{self.name} says: What is {next_hop} even")
 
+    def remove_static_route(self, network: IPv4Network) -> None:
+        """Remove a static route to `network` from the routing table"""
+        if not self.routing_table.remove(network, RouteType.STATIC):
+            raise ValueError(f"{self.name} has no static route to {network}")
+
     def interface_name(self, link: Link) -> str:
         """Cisco-style name of this router's interface on `link` (assigned at attach time)"""
         for iface in self.interfaces.values():

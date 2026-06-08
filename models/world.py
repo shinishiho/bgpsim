@@ -194,6 +194,26 @@ class World:
             f"no network {network.network_address} mask {network.netmask}",
         )
 
+    def add_static_route(self, router: Router, network: IPv4Network, next_hop: IPv4Address) -> None:
+        """Install a static route to `network` via `next_hop` on `router`"""
+        router.add_static_route(network, next_hop)
+        self.clock.record(
+            "rib",
+            f"{router.name} static {network}",
+            f"`{router.name}` installed a static route to `{network}` via `{next_hop}`",
+            f"ip route {network.network_address} {network.netmask} {next_hop}",
+        )
+
+    def remove_static_route(self, router: Router, network: IPv4Network) -> None:
+        """Remove the static route to `network` from `router`"""
+        router.remove_static_route(network)
+        self.clock.record(
+            "rib",
+            f"{router.name} no static {network}",
+            f"`{router.name}` removed the static route to `{network}`",
+            f"no ip route {network.network_address} {network.netmask}",
+        )
+
     def cut_link(self, router_a: Router, router_b: Router) -> None:
         """Shark eats cable"""
         link = router_a.get_link_to(router_b)

@@ -42,8 +42,17 @@ class RoutingTable:
 
         self.routes.append(entry)
 
-    def remove(self, network: IPv4Network) -> None:
-       self.routes = [r for r in self.routes if r.network != network]
+    def remove(self, network: IPv4Network, route_type: RouteType | None = None) -> bool:
+       """Remove routes for `network`, optionally only those of `route_type`.
+
+       Returns True if any were removed.
+       """
+       before = len(self.routes)
+       self.routes = [
+           r for r in self.routes
+           if r.network != network or (route_type is not None and r.route_type is not route_type)
+       ]
+       return len(self.routes) < before
 
     def remove_by_type(self, route_type: RouteType) -> None:
        """Currently used to remove BGP routes, to refresh the routes after each BGP update"""
