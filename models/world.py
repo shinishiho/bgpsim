@@ -48,7 +48,7 @@ class World:
         """Tick continuously until no more updates. Return the number of ticks elapsed."""
         for ticks in range(1, max_ticks + 1):
             if not self.step():
-                return ticks - 1  # the last (empty) tick did no work
+                return ticks - 1  # the last tick is empty
         raise RuntimeError(f"No convergence within {max_ticks} ticks")
 
     def build_ibgp_mesh(self, asn: int = 1) -> list[BGPSession]:
@@ -202,12 +202,13 @@ class WorldClock:
     """The world's time keeper
 
     A history book, and prophecy(?) of the world.
+    A "tick" is a list of events that occurred in a single timestep.
     """
 
     def __init__(self):
         self.now:    int              = 0   # recording head: tick that new events get
         self.events: list[WorldEvent] = []  # append-only timeline
-        self.cursor: int              = -1  # playback position; -1 = before first event
+        self.cursor: int              = 0   # playback tick, in [0, last_tick]
 
     def record(self, english_message: str, technical_message: str) -> WorldEvent:
         """Record a world event
@@ -221,27 +222,47 @@ class WorldClock:
         return event
 
     @property
-    def current(self) -> WorldEvent | None:
-        """The event under the playback cursor, or None"""
-        return self.events[self.cursor] if 0 <= self.cursor < len(self.events) else None
+    def last_tick(self) -> int:
+        """Get the latest event's tick"""
+        return self.events[-1].tick if self.events else 0
 
-    def advance(self) -> WorldEvent | None:
-        """Return the next event in the timeline and advance the cursor"""
-        if self.cursor >= len(self.events) - 1:
-            # If we are at the end of the world
-            print("This is the end...\nHold your breath and count... to ten...")
-            return None
+    @property
+    def current_events(self) -> list[WorldEvent]:
+        """Events under the current tick (empty when nothing happened this tick)."""
+        return [e for e in self.events if e.tick == self.cursor]
 
-        self.cursor += 1
-        return self.events[self.cursor]
+    @property
+    def cursor_position(self) -> int:
+        """The tick the playback cursor is sitting on."""
+        return self.cursor
 
-    def rewind(self) -> WorldEvent | None:
-        """Return an event in the past, not touching the timeline"""
-        if self.cursor <= 0:
-            return None
+    @property
+    def can_rewind(self) -> bool:
+        """Is there an earlier tick to rewind to?"""
+        return self.cursor > 0
 
-        self.cursor -= 1
-        return self.events[self.cursor]
+    @property
+    def can_advance(self) -> bool:
+        """Is there a later tick to advance to?"""
+        return self.cursor < self.last_tick
+
+    def advance(self) -> None:
+        """Move the cursor to the next tick."""
+        if self.cursor < self.last_tick:
+            self.cursor += 1
+
+    def rewind(self) -> None:
+        """Move the cursor to the previous tick."""
+        if self.cursor > 0:
+            self.cursor -= 1
+
+    def to_first(self) -> None:
+        """Jump the cursor to the earliest tick."""
+        self.cursor = 0
+
+    def to_last(self) -> None:
+        """Jump the cursor to the latest tick that has events."""
+        self.cursor = self.last_tick
 
 
 class WorldEvent:
