@@ -159,7 +159,14 @@ class BGPSimApp(App):
     @on(Button.Pressed, "#playhead_last")
     async def _playhead_last(self, _: Button.Pressed) -> None:
         """Converge the sim and jump the cursor to the newest event."""
-        self.world.converge()
+        result = self.world.converge()
+        if not result.converged:
+            self.notify(
+                f"Stopped after {result.ticks} ticks without converging "
+                "(possible route oscillation).",
+                title="Did not converge",
+                severity="warning",
+            )
         self.world.clock.to_last()
         await self._refresh_world_views()
 

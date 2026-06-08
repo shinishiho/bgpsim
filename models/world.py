@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import NamedTuple, TYPE_CHECKING
 from ipaddress import IPv4Network
 
 from .router import RouterManager
@@ -24,6 +24,14 @@ def _short_iface(name: str) -> str:
         if name.startswith(long):
             return short + name[len(long):]
     return name
+
+
+class ConvergeResult(NamedTuple):
+    """Outcome of a `World.converge()` run: whether it reached a fixed point
+    and how many ticks it took."""
+
+    converged: bool
+    ticks: int
 
 
 class World:
@@ -57,12 +65,18 @@ class World:
 
         return self.clock.events[before:]
 
-    def converge(self, max_ticks: int = 256) -> int:
-        """Tick continuously until no more updates. Return the number of ticks elapsed."""
+    def converge(self, max_ticks: int = 256) -> ConvergeResult:
+        """Tick until no more updates, capped at `max_ticks`.
+
+        Returns whether a fixed point was reached and how many ticks it took. A
+        network with no fixed point (a BGP route oscillation / policy dispute)
+        keeps producing events forever, so we stop at the cap and report
+        `converged=False` instead of spinning or raising.
+        """
         for ticks in range(1, max_ticks + 1):
             if not self.step():
-                return ticks - 1  # the last tick is empty
-        raise RuntimeError(f"No convergence within {max_ticks} ticks")
+                return ConvergeResult(True, ticks - 1)  # the last tick is empty
+        return ConvergeResult(False, max_ticks)
 
     def build_ibgp_mesh(self, asn: int = 1) -> list[BGPSession]:
         """Create a full iBGP mesh for every router in `asn`.
