@@ -11,6 +11,25 @@ if TYPE_CHECKING:
     from ..router import Router, Interface
     from ..world import WorldClock
 
+
+def _path_attrs(next_hop, as_path, local_pref=None, med=None) -> str:
+    """Print path attributes. For example:
+
+    >>> _path_attrs("192.168.0.1", [65002, 65003])
+    'via `192.168.0.1`, as-path `65002 65003`'
+    >>> _path_attrs("0.0.0.0", [], local_pref=100, med=50)
+    'via `0.0.0.0`, as-path `i`, local-pref 100, MED 50'
+    """
+
+    path = " ".join(str(a) for a in as_path) or "i"
+    parts = [f"via `{next_hop}`", f"as-path `{path}`"]
+    if local_pref is not None:
+        parts.append(f"local-pref {local_pref}")
+    if med is not None:
+        parts.append(f"MED {med}")
+    return ", ".join(parts)
+
+
 @dataclass
 class BGPEngine:
     """Each router holds a BGP engine
@@ -211,14 +230,20 @@ class BGPEngine:
 
         for prefix, attributes in new_rib.items():
             if prefix not in old_rib or old_rib[prefix] != attributes:
+                next_hop, as_path = attributes[0], attributes[1]
                 clock.record(
-                    f"{name} sent an UPDATE to {peer.name} ({prefix})",
+                    "upd",
+                    f"{name}→{peer.name} {prefix}",
+                    f"`{name}` advertised `{prefix}` to `{peer.name}` — "
+                    f"{_path_attrs(next_hop, as_path)}",
                     f"%BGP-6-UPDATE: neighbor {peer_ip} sent prefix {prefix}",
                 )
         for prefix in old_rib:
             if prefix not in new_rib:
                 clock.record(
-                    f"{name} withdrew {prefix} from {peer.name}",
+                    "upd",
+                    f"{name}→{peer.name} withdraw {prefix}",
+                    f"`{name}` withdrew `{prefix}` from `{peer.name}`",
                     f"%BGP-6-UPDATE: neighbor {peer_ip} withdrew prefix {prefix}",
                 )
 
@@ -242,21 +267,28 @@ class BGPEngine:
 
         name = self.router.name
         for prefix, route in new_loc_rib.items():
+            attrs = _path_attrs(route.next_hop, route.as_path, route.local_pref, route.med)
             if prefix not in old_loc_rib:
                 clock.record(
-                    f"{name} learned a route to {prefix}",
+                    "rib",
+                    f"{name} best {prefix}",
+                    f"`{name}` selected a best path to `{prefix}` — {attrs}",
                     f"loc_rib[{prefix}] += {detail(route)}",
                 )
             elif identity(route) != identity(old_loc_rib[prefix]):
                 clock.record(
-                    f"{name} changed its best path to {prefix}",
+                    "rib",
+                    f"{name} new-best {prefix}",
+                    f"`{name}` changed its best path to `{prefix}` — {attrs}",
                     f"loc_rib[{prefix}] = {detail(route)}",
                 )
 
         for prefix in old_loc_rib:
             if prefix not in new_loc_rib:
                 clock.record(
-                    f"{name} lost its route to {prefix}",
+                    "rib",
+                    f"{name} lost {prefix}",
+                    f"`{name}` lost its route to `{prefix}`",
                     f"loc_rib[{prefix}] removed",
                 )
 

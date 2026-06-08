@@ -155,11 +155,16 @@ class BGPSessionManager:
             router, peer, peer_ip = side.router, side.peer, side.peer_ip
             if is_up:
                 clock.record(
-                    f"{router.name}'s session with {peer.name} came up",
+                    "bgp",
+                    f"{router.name}⇄{peer.name} up",
+                    f"`{router.name}`⇄`{peer.name}` BGP session came up",
                     f"%BGP-5-ADJCHANGE: neighbor {peer_ip} Up",
                 )
             else:
                 clock.record(
-                    f"{router.name}'s session with {peer.name} went down",
+                    "bgp",
+                    f"{router.name}⇄{peer.name} down",
+                    f"`{router.name}`⇄`{peer.name}` BGP session went down "
+                    f"(peer unreachable)",
                     f"%BGP-5-ADJCHANGE: neighbor {peer_ip} Down Peer unreachable",
                 )

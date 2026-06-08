@@ -12,6 +12,20 @@ if TYPE_CHECKING:
     from .bgp.session import BGPSession
 
 
+_IFACE_ABBR = {
+    "GigabitEthernet": "Gi",
+    "Loopback": "Lo",
+}
+
+
+def _short_iface(name: str) -> str:
+    """Get short interface name for titles"""
+    for long, short in _IFACE_ABBR.items():
+        if name.startswith(long):
+            return short + name[len(long):]
+    return name
+
+
 class World:
     """The simulator world
 
@@ -59,7 +73,7 @@ class World:
         routers = [r for r in self.routers.routers if r.bgp_engine.asn == asn]
         sessions = self.bgp_sessions.build_ibgp_mesh(routers)
         for session in sessions:
-            self._record_session(session)
+            self._record_session_open(session)
         return sessions
 
     def create_router(self, name: str | None = None, asn: int = 1) -> Router:
@@ -67,7 +81,9 @@ class World:
         router = self.routers.create(name=name)
         router.bgp_engine.asn = asn
         self.clock.record(
-            f"{router.name} came online in AS{asn}",
+            "sys",
+            f"{router.name} online · AS{asn}",
+            f"`{router.name}` came online in **AS{asn}**",
             f"hostname {router.name}\n!\nrouter bgp {asn}",
         )
         return router
@@ -79,7 +95,10 @@ class World:
             ifname = router.interface_name(link)
             ip = link.get_ip(router)
             self.clock.record(
-                f"{router.name}'s {ifname} came up at {ip}/{link.network.prefixlen}",
+                "link",
+                f"{router.name} {_short_iface(ifname)} up",
+                f"`{router.name}` `{_short_iface(ifname)}` came up at "
+                f"`{ip}/{link.network.prefixlen}`",
                 f"interface {ifname}\n ip address {ip} {link.network.netmask}\n no shutdown",
             )
         return link
@@ -89,7 +108,9 @@ class World:
         network = self.links.alloc_loopback()
         iface = router.add_loopback(network)
         self.clock.record(
-            f"{router.name}'s {iface.name} came up at {iface.ip}/32",
+            "link",
+            f"{router.name} {_short_iface(iface.name)} up",
+            f"`{router.name}` `{_short_iface(iface.name)}` came up at `{iface.ip}/32`",
             f"interface {iface.name}\n ip address {iface.ip} {network.netmask}\n no shutdown",
         )
         return iface
@@ -104,7 +125,9 @@ class World:
         ifname = router.interface_name(link)
         router.interfaces[ifname].shutdown()
         self.clock.record(
-            f"{router.name} shut down {ifname}",
+            "link",
+            f"{router.name} {_short_iface(ifname)} down",
+            f"`{router.name}` administratively shut `{_short_iface(ifname)}`",
             f"interface {ifname}\n shutdown",
         )
 
@@ -114,7 +137,9 @@ class World:
         ifname = router.interface_name(link)
         router.interfaces[ifname].no_shutdown()
         self.clock.record(
-            f"{router.name} brought up {ifname}",
+            "link",
+            f"{router.name} {_short_iface(ifname)} up",
+            f"`{router.name}` brought `{_short_iface(ifname)}` back up",
             f"interface {ifname}\n no shutdown",
         )
 
@@ -127,14 +152,29 @@ class World:
     ) -> BGPSession:
         """Create a BGP session between two routers"""
         session = self.bgp_sessions.create(router_a, router_b, source_addr_a, source_addr_b)
-        self._record_session(session)
+        self._record_session_open(session)
         return session
+
+    def _record_session_open(self, session: BGPSession) -> None:
+        """Record new BGP peering session establishment (one for each side)."""
+        for side in session.sides.values():
+            router, peer, peer_ip, remote_as = side.router, side.peer, side.peer_ip, side.remote_as
+            kind = "eBGP" if session.is_ebgp else "iBGP"
+            self.clock.record(
+                "bgp",
+                f"{router.name}→{peer.name} {kind}",
+                f"`{router.name}` opened an **{kind}** session to "
+                f"`{peer.name}` (`{peer_ip}`, AS{remote_as})",
+                f"router bgp {router.bgp_engine.asn}\n neighbor {peer_ip} remote-as {remote_as}",
+            )
 
     def advertise(self, router: Router, network: IPv4Network) -> None:
         """Originate a prefix into BGP from `router`"""
         router.bgp_engine.advertise_route(network)
         self.clock.record(
-            f"{router.name} advertised {network} into BGP",
+            "bgp",
+            f"{router.name} originates {network}",
+            f"`{router.name}` originated `{network}` into BGP",
             f"router bgp {router.bgp_engine.asn}\n "
             f"network {network.network_address} mask {network.netmask}",
         )
@@ -143,7 +183,9 @@ class World:
         """Stop originating a prefix from `router`"""
         router.bgp_engine.withdraw_route(network)
         self.clock.record(
-            f"{router.name} withdrew {network} from BGP",
+            "bgp",
+            f"{router.name} withdraws {network}",
+            f"`{router.name}` stopped originating `{network}`",
             f"router bgp {router.bgp_engine.asn}\n "
             f"no network {network.network_address} mask {network.netmask}",
         )
@@ -155,7 +197,9 @@ class World:
         for router in (router_a, router_b):
             ifname = router.interface_name(link)
             self.clock.record(
-                f"{router.name}'s {ifname} went down (cable cut)",
+                "link",
+                f"{router.name} {_short_iface(ifname)} cut",
+                f"`{router.name}` `{_short_iface(ifname)}` went down (cable cut)",
                 f"%LINK-3-UPDOWN: Interface {ifname}, changed state to down",
             )
 
@@ -166,7 +210,9 @@ class World:
         for router in (router_a, router_b):
             ifname = router.interface_name(link)
             self.clock.record(
-                f"{router.name}'s {ifname} came back up (cable repaired)",
+                "link",
+                f"{router.name} {_short_iface(ifname)} up",
+                f"`{router.name}` `{_short_iface(ifname)}` came back up (cable repaired)",
                 f"%LINK-3-UPDOWN: Interface {ifname}, changed state to up",
             )
 
@@ -183,18 +229,10 @@ class World:
 
         for router, ifname in removed:
             self.clock.record(
-                f"{router.name} lost {ifname} (cable pulled)",
+                "link",
+                f"{router.name} {_short_iface(ifname)} removed",
+                f"`{router.name}` lost `{_short_iface(ifname)}` (cable pulled)",
                 f"%LINK-3-UPDOWN: Interface {ifname}, changed state to down",
-            )
-
-    def _record_session(self, session: BGPSession) -> None:
-        """Record a world event for BGP session creation"""
-        for side in session.sides.values():
-            router, peer, peer_ip, remote_as = side.router, side.peer, side.peer_ip, side.remote_as
-            kind = "eBGP" if session.is_ebgp else "iBGP"
-            self.clock.record(
-                f"{router.name} opened an {kind} session to {peer.name} ({peer_ip}, AS{remote_as})",
-                f"router bgp {router.bgp_engine.asn}\n neighbor {peer_ip} remote-as {remote_as}",
             )
 
 
@@ -210,14 +248,22 @@ class WorldClock:
         self.events: list[WorldEvent] = []  # append-only timeline
         self.cursor: int              = 0   # playback tick, in [0, last_tick]
 
-    def record(self, english_message: str, technical_message: str) -> WorldEvent:
-        """Record a world event
-        
+    def record(
+        self,
+        category: str,
+        title: str,
+        summary: str,
+        detail: str,
+    ) -> WorldEvent:
+        """Record a world event.
+
         Keyword arguments:
-        english_message: a natural language description of the event, for narration purposes
-        technical_message: a Cisco-style syslog message, or configuration command
+        category: one of "sys"/"link"/"bgp"/"upd"/"rib".
+        title: a short, plain headline for the narrow timeline header.
+        summary: markdown narration, rendered on both surfaces.
+        detail: a Cisco-style syslog message or configuration command, using code block.
         """
-        event = WorldEvent(english_message, technical_message, tick=self.now)
+        event = WorldEvent(category, title, summary, detail, tick=self.now)
         self.events.append(event)
         return event
 
@@ -269,14 +315,28 @@ class WorldEvent:
     """Events occur in the world
 
     It can be a link state change, BGP message exchange, etc.
+
+    The two display surfaces (the narrow timeline, the command history) read
+    different fields, so an event carries a few structured pieces rather than one
+    blob of prose:
+
+    category: a coarse kind ("sys"/"link"/"bgp"/"upd"/"rib") the UI turns into a
+        short text tag and uses for grouping.
+    title:    a short, plain headline that fits the narrow timeline header.
+    summary:  a rich (markdown) one-line narration, rendered on both surfaces.
+    detail:   the Cisco-style config/syslog line, rendered inside a code block.
     """
 
     def __init__(
         self,
-        english_message: str,
-        technical_message: str,
+        category: str,
+        title: str,
+        summary: str,
+        detail: str,
         tick: int = 0,
     ):
-        self.english_message:   str = english_message
-        self.technical_message: str = technical_message
-        self.tick:              int = tick
+        self.category: str = category
+        self.title:    str = title
+        self.summary:  str = summary
+        self.detail:   str = detail
+        self.tick:     int = tick
