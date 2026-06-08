@@ -43,6 +43,12 @@ class BGPEngine:
     loc_rib: dict[IPv4Network, BGPRoute] = field(default_factory=dict)
     # Routes advertised manually
     manual_rib: dict[IPv4Network, BGPRoute] = field(default_factory=dict)
+    # Rejected routes, for logging purposes
+    # Key: (router name, prefix)
+    # Value: (peer ip, as-path)
+    rejected_in: dict[tuple[str, IPv4Network], tuple[IPv4Address, tuple[int, ...]]] = field(
+        default_factory=dict
+    )
     # hold_time: int = 180 # Timer is not implemented yet
     # import/export policy?
 
@@ -120,6 +126,8 @@ class BGPEngine:
         When a clock is supplied, loc_rib changes are recorded onto the timeline.
         """
         old_loc_rib = self.loc_rib
+        old_rejected = self.rejected_in
+        new_rejected: dict[tuple[str, IPv4Network], tuple[IPv4Address, tuple[int, ...]]] = {}
 
         # Receive routes
         processing: dict[IPv4Network, list[BGPRoute]] = {}
@@ -133,7 +141,11 @@ class BGPEngine:
                 route = copy.deepcopy(route)
                 # Get some filtering and policies
                 if self.asn in route.as_path:
-                    continue # Loop prevention
+                    # Loop prevention
+                    new_rejected[(side.peer.name, route.prefix)] = (
+                        side.peer_ip, tuple(route.as_path)
+                    )
+                    continue
 
                 if route.prefix not in processing:
                     processing[route.prefix] = []
@@ -164,6 +176,8 @@ class BGPEngine:
 
         if clock is not None:
             self._record_rib_changes(old_loc_rib, new_loc_rib, clock)
+            self._record_rejections(old_rejected, new_rejected, clock)
+        self.rejected_in = new_rejected
 
         for session in self.sessions:
             side = session.view(self.router)
@@ -291,6 +305,30 @@ class BGPEngine:
                     f"`{name}` lost its route to `{prefix}`",
                     f"loc_rib[{prefix}] removed",
                 )
+
+    def _record_rejections(
+        self,
+        old_rejected: dict[tuple[str, IPv4Network], tuple[IPv4Address, tuple[int, ...]]],
+        new_rejected: dict[tuple[str, IPv4Network], tuple[IPv4Address, tuple[int, ...]]],
+        clock: WorldClock,
+    ) -> None:
+        """Narrate inbound routes newly dropped by loop prevention.
+
+        Only routes rejected this pass but not the previous one are recorded, so a
+        persistently-looped route is reported once rather than every tick.
+        """
+        name = self.router.name
+        for (peer_name, prefix), (peer_ip, as_path) in new_rejected.items():
+            if (peer_name, prefix) in old_rejected:
+                continue
+            path = " ".join(str(a) for a in as_path) or "i"
+            clock.record(
+                "rej",
+                f"{name} loop {prefix}",
+                f"`{name}` rejected `{prefix}` from `{peer_name}` — AS-path loop "
+                f"(AS{self.asn} already in `{path}`)",
+                f"%BGP-6-UPDATE: neighbor {peer_ip} denied {prefix} (AS-PATH loop)",
+            )
 
     def _find_egress_interface(self, next_hop: IPv4Address) -> Interface | None:
         """Find the egress interface to reach the next hop
