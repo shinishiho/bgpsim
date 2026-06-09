@@ -2,6 +2,12 @@
 
 A simple BGP Simulator written in Python. Targets networking beginners and enthusiasts, and me.
 
+## Screenshots
+
+![Topology view with command history](assets/topology.svg)
+
+![Inspector showing R3's routing table](assets/inspector.svg)
+
 ## Features
 
 - Built with [Textual](https://github.com/textualize/textual) -- fully functional TUI.
