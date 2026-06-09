@@ -110,6 +110,18 @@ class Router:
         )
         return iface
 
+    def remove_interface(self, link: Link) -> None:
+        """Detach the interface on `link` and remove its connected route
+        
+        Note: it should be called in pair with the other router
+        """
+        name = next((n for n, iface in self.interfaces.items() if iface.link is link), None)
+        if name is not None:
+            iface = self.interfaces.pop(name)
+            if iface in link.interfaces:
+                link.interfaces.remove(iface)
+        self.routing_table.remove(link.network)
+
     def add_loopback(self, network: IPv4Network) -> Interface:
         """Add a virtual loopback interface (no cable) and its connected /32 route"""
         ip = list(network.hosts())[0]
@@ -129,17 +141,10 @@ class Router:
         )
         return iface
 
-    def remove_interface(self, link: Link) -> None:
-        """Detach the interface on `link` and remove its connected route
-        
-        Note: it should be called in pair with the other router
-        """
-        name = next((n for n, iface in self.interfaces.items() if iface.link is link), None)
-        if name is not None:
-            iface = self.interfaces.pop(name)
-            if iface in link.interfaces:
-                link.interfaces.remove(iface)
-        self.routing_table.remove(link.network)
+    def remove_loopback(self, iface: Interface) -> None:
+        """Detach a loopback interface and remove its connected /32 route"""
+        self.interfaces.pop(iface.name, None)
+        self.routing_table.remove(iface.network)
 
     def add_static_route(self, network: IPv4Network, next_hop: IPv4Address) -> None:
         """Add a static route to the routing table
@@ -254,3 +259,7 @@ class RouterManager:
         self.routers.append(router)
 
         return router
+
+    def destroy(self, router: Router) -> None:
+        """Sayonara"""
+        self.routers.remove(router)

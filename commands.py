@@ -165,13 +165,13 @@ def _cmd_static_route(world: World, args: list[str]) -> str:
 
 
 def _cmd_no_static_route(world: World, args: list[str]) -> str:
-    _need(args, 2, "no-static <router> <prefix>")
+    _need(args, 2, "no static <router> <prefix>")
     world.remove_static_route(_router(world, args[0]), _prefix(args[1]))
     return ""
 
 
-def _cmd_withdraw(world: World, args: list[str]) -> str:
-    _need(args, 2, "withdraw <router> <prefix>")
+def _cmd_no_advertise(world: World, args: list[str]) -> str:
+    _need(args, 2, "no advertise <router> <prefix>")
     world.withdraw(_router(world, args[0]), _prefix(args[1]))
     return ""
 
@@ -182,13 +182,44 @@ def _cmd_mesh(world: World, args: list[str]) -> str:
     return f"meshed {len(sessions)} new iBGP session(s) in AS{asn}"
 
 
+def _cmd_no_mesh(world: World, args: list[str]) -> str:
+    asn = _asn(args, "no ibgp-mesh as <asn>")
+    sessions = world.destroy_ibgp_mesh(asn)
+    return f"removed {len(sessions)} iBGP session(s) in AS{asn}"
+
+
+def _cmd_no_router(world: World, args: list[str]) -> str:
+    _need(args, 1, "no router <name>")
+    r = _router(world, args[0])
+    world.destroy_router(r)
+    return f"removed {r.name}"
+
+
+def _cmd_no_loopback(world: World, args: list[str]) -> str:
+    _need(args, 1, "no loopback <router> [<ip>]")
+    r = _router(world, args[0])
+    ip = None
+    if len(args) >= 2:
+        try:
+            ip = IPv4Address(args[1])
+        except ValueError:
+            raise CommandError(f"invalid loopback address {args[1]!r}")
+    iface = world.destroy_loopback(r, ip)
+    return f"{r.name} removed {iface.name} ({iface.ip}/32)"
+
+
+def _cmd_no_peer(world: World, args: list[str]) -> str:
+    world.destroy_bgp_session(*_two(world, args, "no peer <A> <B>"))
+    return ""
+
+
 def _cmd_shutdown(world: World, args: list[str]) -> str:
     world.shutdown(*_two(world, args, "shutdown <A> <B>"))
     return ""
 
 
 def _cmd_no_shutdown(world: World, args: list[str]) -> str:
-    world.no_shutdown(*_two(world, args, "no-shutdown <A> <B>"))
+    world.no_shutdown(*_two(world, args, "no shutdown <A> <B>"))
     return ""
 
 
@@ -231,18 +262,18 @@ def _cmd_send(world: World, args: list[str]) -> str:
 
 
 _HELP = """\
-**Commands** — routers are addressed by name (e.g. `R1`).
+**Commands** — routers are addressed by name (e.g. `R1`). Prefix any
+config command with `no` to undo it (Cisco-style).
 
 - `router <name> [as <asn>]` — add a router (AS 1 by default)
 - `link <A> <B> [cost <n>]` — cable two routers
 - `loopback <R>` — add a loopback interface
 - `peer <A> <B>` — open a BGP session (needs a link)
 - `advertise <R> <prefix>/<mask>` — originate a network the router has; mask required, e.g. `10.0.0.0/24` or `10.0.0.0 255.255.255.0`
-- `withdraw <R> <prefix>` — stop originating a prefix
 - `static <R> <prefix> <next-hop>` — install a static route
-- `no-static <R> <prefix>` — remove a static route
 - `ibgp-mesh as <asn>` — full iBGP mesh across an AS
-- `shutdown` / `no-shutdown <A> <B>` — admin-down / up the link
+- `shutdown <A> <B>` — admin-down the link
+- `no <command> …` — undo it, e.g. `no router R1`, `no link A B`, `no loopback R1 [ip]`, `no peer A B`, `no advertise R1 <prefix>`, `no static R1 <prefix>`, `no ibgp-mesh as <asn>`, `no shutdown A B`
 - `cut` / `repair` / `destroy <A> <B>` — cable faults
 - `send <R> <dst>` — data-plane reachability test
 - `help` — this list
@@ -255,18 +286,43 @@ def _cmd_help(world: World, args: list[str]) -> str:
     return _HELP
 
 
+# Inverse handlers reached via the `no` prefix: `no advertise R1 …` undoes
+# `advertise R1 …`. Aliases mirror the constructive verbs in `_DISPATCH`.
+_NO_DISPATCH: dict[str, Callable[[World, list[str]], str]] = {
+    "router": _cmd_no_router,        "add-router": _cmd_no_router,
+    "link": _cmd_destroy,            "connect": _cmd_destroy,
+    "loopback": _cmd_no_loopback,    "lo": _cmd_no_loopback,
+    "peer": _cmd_no_peer,            "bgp": _cmd_no_peer,
+    "advertise": _cmd_no_advertise,  "adv": _cmd_no_advertise,
+    "static": _cmd_no_static_route,  "static-route": _cmd_no_static_route,
+    "ibgp-mesh": _cmd_no_mesh,       "mesh": _cmd_no_mesh,
+    "shutdown": _cmd_no_shutdown,
+}
+
+
+def _cmd_no(world: World, args: list[str]) -> str:
+    """Dispatch `no <command> …` to the inverse of `<command>`."""
+    if not args:
+        raise CommandError(
+            "usage: no <command> … (e.g. `no advertise R1 10.0.0.0/24`)"
+        )
+    sub, rest = args[0].lower(), args[1:]
+    handler = _NO_DISPATCH.get(sub)
+    if handler is None:
+        raise CommandError(f"nothing to undo for {sub!r}")
+    return handler(world, rest)
+
+
 _DISPATCH: dict[str, Callable[[World, list[str]], str]] = {
     "router": _cmd_router,       "add-router": _cmd_router,
     "link": _cmd_link,           "connect": _cmd_link,
     "loopback": _cmd_loopback,   "lo": _cmd_loopback,
     "peer": _cmd_peer,           "bgp": _cmd_peer,
     "advertise": _cmd_advertise, "adv": _cmd_advertise,
-    "withdraw": _cmd_withdraw,
     "static": _cmd_static_route, "static-route": _cmd_static_route,
-    "no-static": _cmd_no_static_route,
     "ibgp-mesh": _cmd_mesh,      "mesh": _cmd_mesh,
     "shutdown": _cmd_shutdown,
-    "no-shutdown": _cmd_no_shutdown,
+    "no": _cmd_no,
     "cut": _cmd_cut,
     "repair": _cmd_repair,
     "destroy": _cmd_destroy,

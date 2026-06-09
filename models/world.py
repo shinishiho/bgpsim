@@ -89,6 +89,21 @@ class World:
             self._record_session_open(session)
         return sessions
 
+    def destroy_ibgp_mesh(self, asn: int = 1) -> list[BGPSession]:
+        """Tear down the iBGP sessions inside `asn`.
+
+        Closes every iBGP session whose both endpoints live in `asn` (whether
+        it came from a mesh or a hand-rolled `peer`); leaves eBGP untouched.
+        """
+        members = {r for r in self.routers.routers if r.bgp_engine.asn == asn}
+        sessions = [
+            s for s in self.bgp_sessions.sessions
+            if not s.is_ebgp and set(s.sides) <= members
+        ]
+        for session in sessions:
+            self.destroy_bgp_session(*session.sides)
+        return sessions
+
     def create_router(self, name: str | None = None, asn: int = 1) -> Router:
         """Add a router to the world (auto-named R{N} when name is None)"""
         router = self.routers.create(name=name)
@@ -101,20 +116,30 @@ class World:
         )
         return router
 
-    def create_link(self, router_a: Router, router_b: Router, cost: int = 10) -> Link:
-        """Connect two routers with a cable"""
-        link = self.links.create(router_a, router_b, cost)
-        for router in (router_a, router_b):
-            ifname = router.interface_name(link)
-            ip = link.get_ip(router)
-            self.clock.record(
-                "link",
-                f"{router.name} {_short_iface(ifname)} up",
-                f"`{router.name}` `{_short_iface(ifname)}` came up at "
-                f"`{ip}/{link.network.prefixlen}`",
-                f"interface {ifname}\n ip address {ip} {link.network.netmask}\n no shutdown",
-            )
-        return link
+    def destroy_router(self, router: Router) -> None:
+        """Remove a router and everything attached to it.
+
+        Tears down its BGP sessions, pulls every cable to it (freeing the link
+        networks and the peer interfaces), and returns its loopback /32s to the
+        pool before dropping it from the world.
+        """
+        for session in [s for s in self.bgp_sessions.sessions if router in s.sides]:
+            self.bgp_sessions.destroy(session)
+        peers = [
+            r for r in self.routers.routers
+            if r is not router and r.has_link_to(router)
+        ]
+        for peer in peers:
+            self.links.destroy(router, peer)
+        for iface in [i for i in router.interfaces.values() if i.is_loopback]:
+            self.links.free_loopback(iface.network)
+        self.routers.destroy(router)
+        self.clock.record(
+            "sys",
+            f"{router.name} removed",
+            f"`{router.name}` was removed from the topology",
+            f"no hostname {router.name}",
+        )
 
     def create_loopback(self, router: Router) -> Interface:
         """Add a loopback interface to `router` (a /32 from the loopback pool)"""
@@ -125,6 +150,38 @@ class World:
             f"{router.name} {_short_iface(iface.name)} up",
             f"`{router.name}` `{_short_iface(iface.name)}` came up at `{iface.ip}/32`",
             f"interface {iface.name}\n ip address {iface.ip} {network.netmask}\n no shutdown",
+        )
+        return iface
+
+    def destroy_loopback(self, router: Router, ip: IPv4Address | None = None) -> Interface:
+        """Remove a loopback interface from `router` and free its /32.
+
+        With a single loopback the address is optional; with several, the
+        operator must name which one by its IP.
+        """
+        loopbacks = [i for i in router.interfaces.values() if i.is_loopback]
+        if not loopbacks:
+            raise ValueError(f"{router.name} has no loopback to remove")
+        if ip is None:
+            if len(loopbacks) > 1:
+                addrs = ", ".join(str(i.ip) for i in loopbacks)
+                raise ValueError(
+                    f"{router.name} has several loopbacks ({addrs}); say which one"
+                )
+            iface = loopbacks[0]
+        else:
+            iface = next((i for i in loopbacks if i.ip == ip), None)
+            if iface is None:
+                raise ValueError(f"{router.name} has no loopback at {ip}")
+        network = iface.network
+        router.remove_loopback(iface)
+        self.links.free_loopback(network)
+        self.clock.record(
+            "link",
+            f"{router.name} {_short_iface(iface.name)} removed",
+            f"`{router.name}` removed loopback `{_short_iface(iface.name)}` "
+            f"(`{iface.ip}/32`)",
+            f"no interface {iface.name}",
         )
         return iface
 
@@ -197,6 +254,26 @@ class World:
                 cisco,
             )
 
+    def destroy_bgp_session(self, router_a: Router, router_b: Router) -> None:
+        """Close the BGP session between two routers (`no neighbor`)."""
+        session = next(
+            (s for s in self.bgp_sessions.sessions
+             if set(s.sides) == {router_a, router_b}),
+            None,
+        )
+        if session is None:
+            raise ValueError(
+                f"{router_a.name} has no BGP session with {router_b.name}"
+            )
+        self.bgp_sessions.destroy(session)
+        for side in session.sides.values():
+            self.clock.record(
+                "bgp",
+                f"{side.router.name}✗{side.peer.name} closed",
+                f"`{side.router.name}` closed its BGP session to `{side.peer.name}`",
+                f"router bgp {side.router.bgp_engine.asn}\n no neighbor {side.peer_ip}",
+            )
+
     def advertise(self, router: Router, network: IPv4Network) -> None:
         """Originate a prefix into BGP from `router`.
 
@@ -246,6 +323,21 @@ class World:
             f"`{router.name}` removed the static route to `{network}`",
             f"no ip route {network.network_address} {network.netmask}",
         )
+
+    def create_link(self, router_a: Router, router_b: Router, cost: int = 10) -> Link:
+        """Connect two routers with a cable"""
+        link = self.links.create(router_a, router_b, cost)
+        for router in (router_a, router_b):
+            ifname = router.interface_name(link)
+            ip = link.get_ip(router)
+            self.clock.record(
+                "link",
+                f"{router.name} {_short_iface(ifname)} up",
+                f"`{router.name}` `{_short_iface(ifname)}` came up at "
+                f"`{ip}/{link.network.prefixlen}`",
+                f"interface {ifname}\n ip address {ip} {link.network.netmask}\n no shutdown",
+            )
+        return link
 
     def cut_link(self, router_a: Router, router_b: Router) -> None:
         """Shark eats cable"""
