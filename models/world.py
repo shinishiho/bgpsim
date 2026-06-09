@@ -198,7 +198,15 @@ class World:
             )
 
     def advertise(self, router: Router, network: IPv4Network) -> None:
-        """Originate a prefix into BGP from `router`"""
+        """Originate a prefix into BGP from `router`.
+
+        Only networks that the router knows of are allowed to be advertised.
+        """
+        if not any(route.network == network for route in router.routing_table.routes):
+            raise ValueError(
+                f"{router.name} doesn't know this {network}; only advertise a network "
+                f"it actually has (a connected, loopback, or static route)"
+            )
         router.bgp_engine.advertise_route(network)
         self.clock.record(
             "bgp",
