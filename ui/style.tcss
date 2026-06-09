@@ -131,10 +131,6 @@ Screen {
   padding: 0 1;
 }
 
-#cmd_detail MarkdownTableContent {
-  grid-columns: auto 2fr 3fr;
-}
-
 #legend {
   width: 24;
   height: 100%;

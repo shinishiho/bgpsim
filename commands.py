@@ -10,6 +10,7 @@ Timeline buttons in the UI.
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from ipaddress import IPv4Address, IPv4Network
 from typing import TYPE_CHECKING, Callable
@@ -282,29 +283,93 @@ def _cmd_send(world: World, args: list[str]) -> str:
 
 
 _HELP = """\
-**Commands** — routers are addressed by name (e.g. `R1`). Prefix any
-config command with `no` to undo it (Cisco-style).
+**Commands** — call routers by name (`R1`); aliases are listed beside each verb.
 
-- `router <name> [as <asn>]` — add a router (AS 1 by default)
-- `link <A> <B> [cost <n>]` — cable two routers
-- `loopback <R>` — add a loopback interface
-- `peer <A> <B>` — open a BGP session (needs a link)
-- `advertise <R> <prefix>/<mask>` — originate a network the router has; mask required, e.g. `10.0.0.0/24` or `10.0.0.0 255.255.255.0`
-- `static <R> <prefix> <next-hop>` — install a static route
-- `ibgp-mesh as <asn>` — full iBGP mesh across an AS
-- `next-hop-self <R> <neighbor>` — on `R`'s session toward `neighbor`, rewrite the BGP next-hop to `R` (alias `nhs`)
-- `shutdown <A> <B>` — admin-down the link
-- `no <command> …` — undo it, e.g. `no router R1`, `no link A B`, `no loopback R1 [ip]`, `no peer A B`, `no advertise R1 <prefix>`, `no static R1 <prefix>`, `no ibgp-mesh as <asn>`, `no next-hop-self R neighbor`, `no shutdown A B`
-- `cut` / `repair` / `destroy <A> <B>` — cable faults
-- `send <R> <dst>` — data-plane reachability test
-- `help` — this list
+| Command | Set up | Undo / inverse |
+| --- | --- | --- |
+| `router` · `add-router` | `router <name> [as <asn>]` | `no router <R>` |
+| `link` · `connect` | `link <A> <B> [cost <n>]` | `no link <A> <B>` |
+| `loopback` · `lo` | `loopback <R>` | `no loopback <R> [ip]` |
+| `peer` · `bgp` | `peer <A> <B>` | `no peer <A> <B>` |
+| `advertise` · `adv` | `advertise <R> <prefix>/<mask>` | `no advertise <R> <prefix>` |
+| `static` · `static-route` | `static <R> <prefix> <next-hop>` | `no static <R> <prefix>` |
+| `ibgp-mesh` · `mesh` | `ibgp-mesh as <asn>` | `no ibgp-mesh as <asn>` |
+| `next-hop-self` · `nhs` | `next-hop-self <R> <neighbor>` | `no next-hop-self <R> <neighbor>` |
+| `shutdown` | `shutdown <A> <B>` | `no shutdown <A> <B>` |
+| `cut` | `cut <A> <B>` | `repair <A> <B>` |
+| `repair` | `repair <A> <B>` | `cut <A> <B>` |
+| `destroy` | `destroy <A> <B>` | `no link <A> <B>` |
+| `send` · `ping` | `send <R> <dst>` | — |
+| `help` · `?` | `help` | - |
 
-Time lives on the Timeline buttons: `>` step, `>>` converge, `<` `<<` rewind.
+Time lives on the Timeline buttons: `>` step · `>>` converge · `<` `<<` rewind.
 """
 
 
+# How dare you... to reject me?
+_HELP_REJECTIONS: tuple[tuple[str, ...], ...] = (
+    ("Hmph!", "What?", "...", "..."),
+    ("No.", "You wanted no help.", "...", "I'm not helping you anymore."),
+    (
+        "Why are you still asking?",
+        "Keep asking, it won't change anything.",
+        "Don't look for me.",
+    ),
+    ("...", "You're so desperate.", "Do it yourself.", "Why should I help you?"),
+    (
+        "*sigh* Fine, I'll do it.",
+        "You're persistent. I'll forgive you.",
+        "Okay, I'll help you, but don't you say that again.",
+    ),
+)
+# There's no way back
+_NO_HELP_FAREWELL: tuple[str, ...] = (
+    "So you didn't learn...",
+    "Good. You have matured.",
+    "Good luck.",
+)
+
+
+@dataclass
+class _HelpEasterEgg:
+    """In-memory state for the `no help` grudge (reset on every restart)."""
+
+    no_help_count: int = 0       # how many times `no help` has been said
+    rejections_left: int = 0     # I give you a second chance
+    disabled: bool = False       # Fooled once, it's on you. Fooled twice, it's on me
+
+    def is_sulking(self) -> bool:
+        return self.rejections_left > 0 or self.disabled
+
+
+_help_egg = _HelpEasterEgg()
+
+
 def _cmd_help(world: World, args: list[str]) -> str:
+    egg = _help_egg
+    if egg.disabled:
+        return "..."
+
+    if egg.rejections_left > 0:
+        stage = len(_HELP_REJECTIONS) - egg.rejections_left
+        egg.rejections_left -= 1
+        return random.choice(_HELP_REJECTIONS[stage])
+
     return _HELP
+
+
+def _cmd_no_help(world: World, args: list[str]) -> str:
+    egg = _help_egg
+    if egg.disabled:
+        return "..."
+
+    egg.no_help_count += 1
+    if egg.no_help_count == 1:
+        egg.rejections_left = len(_HELP_REJECTIONS)
+        return "Alright... you don't need my help."
+
+    egg.disabled = True
+    return random.choice(_NO_HELP_FAREWELL)
 
 
 # Inverse handlers reached via the `no` prefix: `no advertise R1 …` undoes
@@ -319,6 +384,7 @@ _NO_DISPATCH: dict[str, Callable[[World, list[str]], str]] = {
     "ibgp-mesh": _cmd_no_mesh,       "mesh": _cmd_no_mesh,
     "next-hop-self": _cmd_no_next_hop_self, "nhs": _cmd_no_next_hop_self,
     "shutdown": _cmd_no_shutdown,
+    "help": _cmd_no_help,            "?": _cmd_no_help,
 }
 
 

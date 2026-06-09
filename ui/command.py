@@ -1,6 +1,7 @@
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
+from textual.reactive import reactive
 from textual.widgets import (
     Input,
     Label,
@@ -15,11 +16,21 @@ from .legend import Legend
 class CommandBar(Input):
     """Placed at the bottom, for user to type commands."""
 
+    DEFAULT_PLACEHOLDER = "Lost? Type \"help\" or \"?\" to display the list of commands."
+    SULK_PLACEHOLDER = "Lost? Good luck."
+
+    # Flipped on by the app while `no help` is mid-sulk; the watcher swaps the
+    # placeholder text to match.
+    sulking: reactive[bool] = reactive(False)
+
     def __init__(self) -> None:
         super().__init__(
-            placeholder="Lost? Type \"help\" or \"?\" to display the list of commands.",
+            placeholder=self.DEFAULT_PLACEHOLDER,
             id="command"
         )
+
+    def watch_sulking(self, sulking: bool) -> None:
+        self.placeholder = self.SULK_PLACEHOLDER if sulking else self.DEFAULT_PLACEHOLDER
 
 
 class CommandHistory(Horizontal):

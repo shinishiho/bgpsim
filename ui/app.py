@@ -16,7 +16,7 @@ from textual.widgets import (
 
 from models.world import World
 from models.router import Router
-from commands import apply_command, CommandResult
+from commands import apply_command, CommandResult, _help_egg
 
 from .command import CommandBar, CommandHistory
 from .timeline import TimelinePanel
@@ -122,6 +122,7 @@ class BGPSimApp(App):
         await self.query_one(CommandHistory).add_command(
             line, self._format_result(line, result)
         )
+        self.query_one(CommandBar).sulking = _help_egg.is_sulking()
         await self._refresh_world_views()
 
     @staticmethod
