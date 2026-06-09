@@ -277,6 +277,37 @@ class World:
                 f"router bgp {side.router.bgp_engine.asn}\n no neighbor {side.peer_ip}",
             )
 
+    def set_next_hop_self(
+        self,
+        router: Router,
+        neighbor: Router,
+        enabled: bool = True,
+    ) -> None:
+        """Toggle `next-hop-self` on `router`'s session toward `neighbor`.
+
+        This is one-sided only, unlike most of the world commands that
+        do the job for both sides.
+        """
+        session = next(
+            (s for s in self.bgp_sessions.sessions
+             if set(s.sides) == {router, neighbor}),
+            None,
+        )
+        if session is None:
+            raise ValueError(
+                f"{router.name} has no BGP session with {neighbor.name}"
+            )
+        side = session.view(router)
+        side.next_hop_self = enabled
+        verb = "set" if enabled else "cleared"
+        self.clock.record(
+            "bgp",
+            f"{router.name}→{neighbor.name} next-hop-self {'on' if enabled else 'off'}",
+            f"`{router.name}` {verb} next-hop-self toward `{neighbor.name}`",
+            f"router bgp {router.bgp_engine.asn}\n "
+            f"{'' if enabled else 'no '}neighbor {side.peer_ip} next-hop-self",
+        )
+
     def advertise(self, router: Router, network: IPv4Network) -> None:
         """Originate a prefix into BGP from `router`.
 

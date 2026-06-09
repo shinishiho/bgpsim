@@ -223,6 +223,18 @@ def _cmd_no_shutdown(world: World, args: list[str]) -> str:
     return ""
 
 
+def _cmd_next_hop_self(world: World, args: list[str]) -> str:
+    a, b = _two(world, args, "next-hop-self <R> <neighbor>")
+    world.set_next_hop_self(a, b, enabled=True)
+    return ""
+
+
+def _cmd_no_next_hop_self(world: World, args: list[str]) -> str:
+    a, b = _two(world, args, "no next-hop-self <R> <neighbor>")
+    world.set_next_hop_self(a, b, enabled=False)
+    return ""
+
+
 def _cmd_cut(world: World, args: list[str]) -> str:
     world.cut_link(*_two(world, args, "cut <A> <B>"))
     return ""
@@ -280,8 +292,9 @@ config command with `no` to undo it (Cisco-style).
 - `advertise <R> <prefix>/<mask>` — originate a network the router has; mask required, e.g. `10.0.0.0/24` or `10.0.0.0 255.255.255.0`
 - `static <R> <prefix> <next-hop>` — install a static route
 - `ibgp-mesh as <asn>` — full iBGP mesh across an AS
+- `next-hop-self <R> <neighbor>` — on `R`'s session toward `neighbor`, rewrite the BGP next-hop to `R` (alias `nhs`)
 - `shutdown <A> <B>` — admin-down the link
-- `no <command> …` — undo it, e.g. `no router R1`, `no link A B`, `no loopback R1 [ip]`, `no peer A B`, `no advertise R1 <prefix>`, `no static R1 <prefix>`, `no ibgp-mesh as <asn>`, `no shutdown A B`
+- `no <command> …` — undo it, e.g. `no router R1`, `no link A B`, `no loopback R1 [ip]`, `no peer A B`, `no advertise R1 <prefix>`, `no static R1 <prefix>`, `no ibgp-mesh as <asn>`, `no next-hop-self R neighbor`, `no shutdown A B`
 - `cut` / `repair` / `destroy <A> <B>` — cable faults
 - `send <R> <dst>` — data-plane reachability test
 - `help` — this list
@@ -304,6 +317,7 @@ _NO_DISPATCH: dict[str, Callable[[World, list[str]], str]] = {
     "advertise": _cmd_no_advertise,  "adv": _cmd_no_advertise,
     "static": _cmd_no_static_route,  "static-route": _cmd_no_static_route,
     "ibgp-mesh": _cmd_no_mesh,       "mesh": _cmd_no_mesh,
+    "next-hop-self": _cmd_no_next_hop_self, "nhs": _cmd_no_next_hop_self,
     "shutdown": _cmd_no_shutdown,
 }
 
@@ -329,6 +343,7 @@ _DISPATCH: dict[str, Callable[[World, list[str]], str]] = {
     "advertise": _cmd_advertise, "adv": _cmd_advertise,
     "static": _cmd_static_route, "static-route": _cmd_static_route,
     "ibgp-mesh": _cmd_mesh,      "mesh": _cmd_mesh,
+    "next-hop-self": _cmd_next_hop_self, "nhs": _cmd_next_hop_self,
     "shutdown": _cmd_shutdown,
     "no": _cmd_no,
     "cut": _cmd_cut,

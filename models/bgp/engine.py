@@ -48,6 +48,12 @@ class BGPEngine:
     rejected_in: dict[tuple[str, IPv4Network], tuple[IPv4Address, tuple[int, ...]]] = field(
         default_factory=dict
     )
+    # Routes in RIB but not installed to FIB, due to unreachability
+    # Key: prefix.
+    # Value: (next_hop, advertiser name or None)
+    fib_unreachable: dict[IPv4Network, tuple[IPv4Address, str | None]] = field(
+        default_factory=dict
+    )
     # hold_time: int = 180 # Timer is not implemented yet
     # import/export policy?
 
@@ -201,7 +207,7 @@ class BGPEngine:
             side.pending_out = out_routes
 
         # After picking the best ones, let's install to the FIB
-        self.refresh_fib()
+        self.refresh_fib(clock)
 
     def commit(
         self,
@@ -353,15 +359,27 @@ class BGPEngine:
             addr = entry.next_hop
         return None # Round and round we go
 
-    def refresh_fib(self) -> None:
-        """Refresh the FIB according to the current loc_rib"""
+    def refresh_fib(self, clock: WorldClock | None = None) -> None:
+        """Refresh the FIB according to the current loc_rib.
+
+        A path received in loc_rib may not be installed into the fib,
+        if the next-hop is unreachable. This is a common case with iBGP,
+        where next-hop-self is required to rewrite next-hop to the border
+        BGP router. Another approach is to advertise the network that
+        next-hop belongs to, but I guess nobody would do that.
+        """
         self.router.routing_table.remove_by_type(RouteType.BGP)
+
+        old_unreachable = self.fib_unreachable
+        new_unreachable: dict[IPv4Network, tuple[IPv4Address, str | None]] = {}
 
         for prefix, route in self.loc_rib.items():
             if route.source.type is BGPRouteSourceType.LOCAL:
                 continue
             iface = self._find_egress_interface(route.next_hop)
-            if iface is None: # Unreachable
+            if iface is None: # Unreachable next-hop
+                advertiser = route.source.router.name if route.source.router else None
+                new_unreachable[prefix] = (route.next_hop, advertiser)
                 continue
             self.router.routing_table.add(
                 Route(
@@ -370,4 +388,36 @@ class BGPEngine:
                     next_hop=route.next_hop,
                     route_type=RouteType.BGP,
                 )
+            )
+
+        if clock is not None:
+            self._record_fib_failures(old_unreachable, new_unreachable, clock)
+        self.fib_unreachable = new_unreachable
+
+    def _record_fib_failures(
+        self,
+        old_unreachable: dict[IPv4Network, tuple[IPv4Address, str | None]],
+        new_unreachable: dict[IPv4Network, tuple[IPv4Address, str | None]],
+        clock: WorldClock,
+    ) -> None:
+        """Record this incident of not installing a route in loc_rib into fib.
+
+        Again, some checks is required for it to not echo the event continuously.
+        """
+        name = self.router.name
+        for prefix, (next_hop, advertiser) in new_unreachable.items():
+            if old_unreachable.get(prefix, (None, None))[0] == next_hop:
+                continue
+            hint = (
+                f"set `next-hop-self {advertiser} {name}`" if advertiser
+                else "make its next-hop reachable"
+            )
+            clock.record(
+                "fib",
+                f"{name} next-hop unreachable {prefix}",
+                f"`{name}` selected `{prefix}` but can't install it — next-hop "
+                f"`{next_hop}` is unreachable. Hint: {hint}, or advertise "
+                f"`{next_hop}`'s subnet (or add a static route to it).",
+                f"%BGP-6-NEXTHOP: {prefix} next-hop {next_hop} inaccessible "
+                f"(RIB-failure, route not installed)",
             )
