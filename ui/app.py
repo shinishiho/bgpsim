@@ -132,7 +132,9 @@ class BGPSimApp(App):
         pane reads across columns instead of stacking tall code blocks."""
         md = [f"`{line}`", ""]
         if not result.ok:
-            md.append(f"❌ {result.error}")
+            # Markdown will catch <> as HTMl tags
+            error = (result.error or "").replace("<", "&lt;").replace(">", "&gt;")
+            md.append(f"❌ {error}")
             return "\n".join(md)
         if result.note:
             md.append(result.note)
