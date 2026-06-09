@@ -70,9 +70,9 @@ class BGPEngine:
 
         Using standard, Cisco-flavored decision-making process:
         highest weight
-        → highest local_pref
+        → highest local-pref
         → locally originated
-        → shortest AS path
+        → shortest as-path
         → lowest origin
         → lowest MED
         → eBGP over iBGP
