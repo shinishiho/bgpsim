@@ -111,8 +111,6 @@ Screen {
   padding: 0 1;
 }
 
-/* Keep the focused row visible: an ID selector outranks ListView's default
-   highlight rules, so restore them here or the highlight disappears. */
 #cmd_list > ListItem.-highlight {
   background: $accent 50%;
 }
@@ -131,6 +129,10 @@ Screen {
   width: 1fr;
   height: 100%;
   padding: 0 1;
+}
+
+#cmd_detail MarkdownTableContent {
+  grid-columns: auto 2fr 3fr;
 }
 
 #legend {

@@ -236,13 +236,13 @@ class Router:
         return peer.forward(packet)
 
     def process_packet(self, packet: Packet) -> str:
-        """Accept a packet addressed to this router and report the receipt."""
-        return (
-            f"(Router {self.name}): Hey, I got a package!\n\n"
-            f"It is from {packet.src}, sending to {packet.dst}.\n\n"
-            f"Peek peek peek... it says:\n\n=== BEGIN PACKET PAYLOAD ===\n\n"
-            f"{packet.payload!r}\n\n=== END PACKET PAYLOAD ==="
-        )
+        """Accept a packet addressed to this router and flag it received.
+
+        The command layer renders the receipt (from/to, payload, path) as a
+        table; here we only report the headline and mark the packet arrived.
+        """
+        packet.received = True
+        return f"(Router {self.name}): Hey, I got a package!"
 
 class RouterManager:
     """Router Manager class

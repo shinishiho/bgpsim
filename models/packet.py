@@ -9,3 +9,4 @@ class Packet:
     payload: Any
     ttl: int = 64
     hops: list[str] = field(default_factory=list)
+    received: bool = False

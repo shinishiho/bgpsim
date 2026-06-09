@@ -258,7 +258,15 @@ def _cmd_send(world: World, args: list[str]) -> str:
     src = next(iter(r.interfaces.values())).ip
     pkt = Packet(src=src, dst=dst, payload="ping")
     outcome = r.forward(pkt)
-    return f"{outcome}\n\nThe packet moved through: {' -> '.join(pkt.hops)}"
+    path = " -> ".join(pkt.hops)
+    if pkt.received:
+        return (
+            f"{outcome}\n\n"
+            f"| From... to... ? | Peek peek peek... it says | The packet moved through |\n"
+            f"| --- | --- | --- |\n"
+            f"| {pkt.src} → {pkt.dst} | {pkt.payload!r} | {path} |\n"
+        )
+    return f"{outcome}\n\nThe packet moved through: {path}"
 
 
 _HELP = """\

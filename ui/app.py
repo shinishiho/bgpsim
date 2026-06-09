@@ -25,6 +25,19 @@ from .overlay import TooSmallOverlay
 from .topology import TopologyView
 
 
+def _table_cell(text: str) -> str:
+    """Escape a markdown string so a stray pipe can't break the table."""
+    return text.replace("|", "\\|")
+
+
+def _cisco_cell(detail: str) -> str:
+    """Collapse a multi-line Cisco snippet into one inline-code table cell."""
+    if not detail:
+        return ""
+    oneline = " ; ".join(p.strip() for p in detail.splitlines() if p.strip())
+    return f"`{_table_cell(oneline)}`"
+
+
 class BGPSimApp(App):
     """BGP Simulator app in Textual. Textual is cool!"""
 
@@ -113,7 +126,9 @@ class BGPSimApp(App):
 
     @staticmethod
     def _format_result(line: str, result: CommandResult) -> str:
-        """Markdown for one history tab: the command + its Cisco echo / error."""
+        """Markdown for one history entry: the command echo, then a table of the
+        events it produced (category · narration · Cisco) so the wide-but-short
+        pane reads across columns instead of stacking tall code blocks."""
         md = [f"`{line}`", ""]
         if not result.ok:
             md.append(f"❌ {result.error}")
@@ -122,12 +137,14 @@ class BGPSimApp(App):
             md.append(result.note)
             md.append("")
         if result.events:
+            md.append("| Tag | Event | Cisco |")
+            md.append("| --- | --- | --- |")
             for event in result.events:
-                md.append(f"**[{event.category.upper()}]** {event.summary}")
-                if event.detail:
-                    md.append("")
-                    md.append(f"```text\n{event.detail}\n```")
-                md.append("")
+                md.append(
+                    f"| {event.category.upper()} "
+                    f"| {_table_cell(event.summary)} "
+                    f"| {_cisco_cell(event.detail)} |"
+                )
         elif not result.note:
             md.append("*(no change)*")
         return "\n".join(md)
