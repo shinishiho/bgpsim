@@ -49,6 +49,7 @@ class BGPSimApp(App):
         Binding("t", "timeline_toggle", "Toggle Timeline panel"),
         Binding("i", "inspector_toggle", "Toggle Inspector panel"),
         Binding("h", "history_toggle", "Toggle Command history"),
+        Binding("ctrl+n", "reset_world", "Reset simulation"),
         Binding("q", "quit", "Quit"),
     ]
 
@@ -202,6 +203,16 @@ class BGPSimApp(App):
     async def clear_history(self, _: Button.Pressed) -> None:
         """Wipe the command history when the broom button is pressed."""
         await self.query_one(CommandHistory).clear_commands()
+
+    async def action_reset_world(self) -> None:
+        """Tactical nuke incoming!!!
+
+        Create a new world and swap it in. Neat.
+        """
+        self.world = World()
+        await self.query_one(CommandHistory).clear_commands()
+        await self._refresh_world_views()
+        self.notify("Simulation reset.", title="Reset")
 
     def action_timeline_toggle(self) -> None:
         """Toggle the visibility of the Timeline panel"""
