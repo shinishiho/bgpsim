@@ -200,11 +200,10 @@ class Router:
         packet.ttl -= 1
 
         if packet.dst in [iface.ip for iface in self.interfaces.values()]:
-            self.process_packet(packet)
-            return f"Finally arrived at {self.name}"
+            return self.process_packet(packet)
 
         if packet.ttl <= 0:
-            return "No time to live, shi ne!"
+            return f"No time to live, shi ne! (Died at {self.name} while going to {packet.dst})"
 
         entry = self.routing_table.lookup(packet.dst)
         if entry is None:
@@ -213,12 +212,32 @@ class Router:
         if not entry.interface.is_up_up:
             return f"{self.name}'s {entry.interface.name} is down"
 
+        # Receive a package to any IP address in the connected subnet
+        # because hosts don't exist here, only routers.
+        # TODO: add internal networks, not just the networks between routers.
+        if entry.next_hop is None:
+            link = entry.interface.link
+            owner = next(
+                (i.router for i in link.interfaces if i.ip == packet.dst), None
+            ) if link is not None else None
+            if owner is not None:
+                return owner.forward(packet)
+            return (
+                f"Delivered to {packet.dst} on {self.name}'s "
+                f"{entry.interface.name} subnet (just assumes a host exists)"
+            )
+
         peer = entry.interface.link.get_peer_of(self) # type: ignore (pkt to loopback should have arrived)
         return peer.forward(packet)
 
-    def process_packet(self, packet: Packet) -> None:
-        """Do something with the received packet"""
-        print(f"{self.name} says: Hey, I received a packet from {packet.src}: {packet.payload}")
+    def process_packet(self, packet: Packet) -> str:
+        """Accept a packet addressed to this router and report the receipt."""
+        return (
+            f"(Router {self.name}): Hey, I got a package!\n\n"
+            f"It is from {packet.src}, sending to {packet.dst}.\n\n"
+            f"Peek peek peek... it says:\n\n=== BEGIN PACKET PAYLOAD ===\n\n"
+            f"{packet.payload!r}\n\n=== END PACKET PAYLOAD ==="
+        )
 
 class RouterManager:
     """Router Manager class

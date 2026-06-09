@@ -223,11 +223,19 @@ def _cmd_send(world: World, args: list[str]) -> str:
     try:
         dst = IPv4Address(args[1])
     except ValueError:
-        dst = _prefix(args[1]).network_address  # tolerate a prefix, take its address
+        # Disallow specifying a network address as the destination
+        try:
+            IPv4Network(args[1], strict=False)
+        except ValueError:
+            raise CommandError(f"invalid destination address {args[1]!r}")
+        raise CommandError(
+            f"{args[1]} is a network, not a host; send to a specific address "
+            f"(e.g. a router's interface IP)"
+        )
     src = next(iter(r.interfaces.values())).ip
     pkt = Packet(src=src, dst=dst, payload="ping")
     outcome = r.forward(pkt)
-    return f"{outcome}\npath: {' -> '.join(pkt.hops)}"
+    return f"{outcome}\n\nThe packet moved through: {' -> '.join(pkt.hops)}"
 
 
 _HELP = """\
