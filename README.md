@@ -44,7 +44,6 @@ undoes with the `no` prefix shown in the last column.
 | `neighbor` · `nb` | `neighbor <R> <nbr> <attr> [value]` | `no neighbor <R> <nbr> <attr>` |
 | `shutdown` | `shutdown <A> <B>` | `no shutdown <A> <B>` |
 | `cut` | `cut <A> <B>` | `repair <A> <B>` |
-| `destroy` | `destroy <A> <B>` | `no link <A> <B>` |
 | `send` · `ping` | `send <R> <dst>` | — |
 | `help` · `?` | `help` | — |
 

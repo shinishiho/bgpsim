@@ -288,8 +288,8 @@ def _cmd_repair(world: World, args: list[str]) -> str:
     return ""
 
 
-def _cmd_destroy(world: World, args: list[str]) -> str:
-    world.destroy_link(*_two(world, args, "destroy <A> <B>"))
+def _cmd_no_link(world: World, args: list[str]) -> str:
+    world.destroy_link(*_two(world, args, "no link <A> <B>"))
     return ""
 
 
@@ -340,7 +340,6 @@ _HELP = """\
 | `shutdown` | `shutdown <A> <B>` | `no shutdown <A> <B>` |
 | `cut` | `cut <A> <B>` | `repair <A> <B>` |
 | `repair` | `repair <A> <B>` | `cut <A> <B>` |
-| `destroy` | `destroy <A> <B>` | `no link <A> <B>` |
 | `send` · `ping` | `send <R> <dst>` | — |
 | `help` · `?` | `help [command]` | - |
 
@@ -392,7 +391,7 @@ link R1 R2
 connect R1 R3 cost 50
 ```
 
-**Undo:** `no link <A> <B>` (alias of `destroy`) — pulls the cable for good. To model an outage instead, use `cut` / `repair`.
+**Undo:** `no link <A> <B>` — pulls the cable for good. To model an outage instead, use `cut` / `repair`.
 """,
     ),
     (
@@ -577,24 +576,6 @@ repair R1 R2
 """,
     ),
     (
-        "destroy", (),
-        """\
-### `destroy` — pull a cable permanently
-
-Removes the link between `<A>` and `<B>` entirely, freeing both interfaces. Unlike `cut` (repairable) or `shutdown` (soft), this is permanent.
-
-**Arguments**
-- `<A> <B>` — the two ends of the link.
-
-**Examples**
-```
-destroy R1 R2
-```
-
-**Undo:** none directly — run `link <A> <B>` to re-cable them. (`no link` is an alias of `destroy`.)
-""",
-    ),
-    (
         "send", ("ping",),
         """\
 ### `send` · `ping` — send a test packet
@@ -740,7 +721,7 @@ def _cmd_no_help(world: World, args: list[str]) -> str:
 # `advertise R1 …`. Aliases mirror the constructive verbs in `_DISPATCH`.
 _NO_DISPATCH: dict[str, Callable[[World, list[str]], str]] = {
     "router": _cmd_no_router,        "add-router": _cmd_no_router,
-    "link": _cmd_destroy,            "connect": _cmd_destroy,
+    "link": _cmd_no_link,            "connect": _cmd_no_link,
     "loopback": _cmd_no_loopback,    "lo": _cmd_no_loopback,
     "peer": _cmd_no_peer,            "bgp": _cmd_no_peer,
     "advertise": _cmd_no_advertise,  "adv": _cmd_no_advertise,
@@ -778,7 +759,6 @@ _DISPATCH: dict[str, Callable[[World, list[str]], str]] = {
     "no": _cmd_no,
     "cut": _cmd_cut,
     "repair": _cmd_repair,
-    "destroy": _cmd_destroy,
     "send": _cmd_send,
     "ping": _cmd_send,
     "help": _cmd_help,           "?": _cmd_help,
