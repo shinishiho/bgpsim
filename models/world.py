@@ -63,7 +63,10 @@ class World:
         for router in self.routers.routers:
             router.bgp_engine.commit(clock=self.clock)
 
-        return self.clock.events[before:]
+        events = self.clock.events[before:]
+        if not events:
+            self.clock.now -= 1  # There is no event, the clock doesn't move.
+        return events
 
     def converge(self, max_ticks: int = 256) -> ConvergeResult:
         """Tick until no more updates, capped at `max_ticks`.
@@ -75,7 +78,7 @@ class World:
         """
         for ticks in range(1, max_ticks + 1):
             if not self.step():
-                return ConvergeResult(True, ticks - 1)  # the last tick is empty
+                return ConvergeResult(True, ticks - 1)  # the last tick is empty, nothing happened
         return ConvergeResult(False, max_ticks)
 
     def build_ibgp_mesh(self, asn: int = 1) -> list[BGPSession]:
