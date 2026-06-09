@@ -12,6 +12,11 @@ if TYPE_CHECKING:
     from ..world import WorldClock
 
 
+# Cisco defaults
+DEFAULT_LOCAL_PREF = 100
+LOCAL_ORIGIN_WEIGHT = 32768
+
+
 def _path_attrs(next_hop, as_path, local_pref=None, med=None) -> str:
     """Print path attributes. For example:
 
@@ -73,23 +78,49 @@ class BGPEngine:
         → eBGP over iBGP
         → lowest IGP metric
         → lowest BGP router-id
-        """
-        candidates.sort(
-            key=lambda route: (
-                route.weight,
-                route.local_pref,
-                route.source.type == BGPRouteSourceType.LOCAL,
-                -len(route.as_path),
-                # origin: no IGP in this sim, so every route is IGP-origin
-                -(route.med if route.med is not None else 0),    # lowest MED (missing = 0)
-                route.source.type == BGPRouteSourceType.EBGP,    # eBGP over iBGP
-                # IGP metric to next-hop: # TODO: use link cost?
-                -int(self._advertiser_router_id(route)),         # lowest router-id
-            ),
-            reverse=True
-        )
 
-        return candidates[0]
+        MED is only comparable between paths learned from the *same* neighboring
+        AS (the default; `bgp always-compare-med` is off). We model this with
+        deterministic MED: group candidates by neighbor AS, pick the best of each
+        group (MED counts there), then compare the group winners with MED ignored.
+        """
+        groups: dict[int | None, list[BGPRoute]] = {}
+        for route in candidates:
+            groups.setdefault(self._neighbor_as(route), []).append(route)
+
+        winners = [
+            max(group, key=lambda r: self._decision_key(r, with_med=True))
+            for group in groups.values()
+        ]
+        return max(winners, key=lambda r: self._decision_key(r, with_med=False))
+
+    def _neighbor_as(self, route: BGPRoute) -> int | None:
+        """The AS this route was learned from.
+
+        Because ASN is appended at the beginning, so we get the first one in as_path.
+        Or None if it's internal.
+        """
+        return route.as_path[0] if route.as_path else None
+
+    def _decision_key(self, route: BGPRoute, *, with_med: bool) -> tuple:
+        """Best-path sort key (larger is better). MED is only included within a
+        neighbor-AS group, so keys built with differing `with_med` must not be mixed.
+        """
+        key: list = [
+            route.weight,
+            route.local_pref,
+            route.source.type == BGPRouteSourceType.LOCAL,
+            -len(route.as_path),
+            # origin: no IGP in this sim, so every route is IGP-origin
+        ]
+        if with_med:
+            key.append(-(route.med if route.med is not None else 0))  # lowest MED (missing = 0)
+        key += [
+            route.source.type == BGPRouteSourceType.EBGP,    # eBGP over iBGP
+            # IGP metric to next-hop: # TODO: use link cost?
+            -int(self._advertiser_router_id(route)),         # lowest router-id
+        ]
+        return tuple(key)
 
     def _advertiser_router_id(self, route: BGPRoute) -> IPv4Address:
         """Router-id of the peer that advertised `route` (self for LOCAL routes)."""
@@ -108,7 +139,8 @@ class BGPEngine:
         route = BGPRoute(
             prefix=network,
             next_hop=IPv4Address("0.0.0.0"),
-            source=BGPRouteSource(type=BGPRouteSourceType.LOCAL)
+            source=BGPRouteSource(type=BGPRouteSourceType.LOCAL),
+            weight=LOCAL_ORIGIN_WEIGHT,
         )
         self.loc_rib[network] = route
         self.manual_rib[network] = copy.deepcopy(route)
@@ -160,6 +192,12 @@ class BGPEngine:
                     router=side.peer,
                 )
 
+                # Cisco proprietary, local only
+                route.weight = 0
+                if session.is_ebgp:
+                    # Drop local_pref if the route is being sent via eBGP
+                    route.local_pref = DEFAULT_LOCAL_PREF
+
                 processing[route.prefix].append(route)
 
         # Rebuild loc_rib
@@ -197,6 +235,10 @@ class BGPEngine:
                     out_route = copy.deepcopy(route)
 
                     if session.is_ebgp:
+                        # MED only propagate one hop, so if as_path has something
+                        # (it has gone through one hop), drop MED
+                        if out_route.as_path:
+                            out_route.med = None
                         out_route.as_path = [self.asn] + out_route.as_path
                         out_route.next_hop = side.self_ip
                     elif side.next_hop_self or route.source.type is BGPRouteSourceType.LOCAL:
