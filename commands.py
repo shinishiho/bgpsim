@@ -342,10 +342,330 @@ _HELP = """\
 | `repair` | `repair <A> <B>` | `cut <A> <B>` |
 | `destroy` | `destroy <A> <B>` | `no link <A> <B>` |
 | `send` · `ping` | `send <R> <dst>` | — |
-| `help` · `?` | `help` | - |
+| `help` · `?` | `help [command]` | - |
+
+Type `help <command>` (e.g. `help neighbor`) for what a verb does, its arguments, and examples.
 
 Time lives on the Timeline buttons: `>` step · `>>` converge · `<` `<<` rewind.
 """
+
+
+# --- per-command help --------------------------------------------------------
+# Each entry: (canonical verb, alias tuple, detailed markdown). `help <verb>`
+# renders one of these; aliases resolve to the same topic so `help adv` works.
+_TOPIC_DEFS: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    (
+        "router", ("add-router",),
+        """\
+### `router` · `add-router` — create a router
+
+Brings a new router online, optionally inside a given AS.
+
+**Arguments**
+- `<name>` — the router's hostname (e.g. `R1`). Must be unique.
+- `as <asn>` *(optional)* — the BGP autonomous-system number it belongs to. Defaults to **AS1**.
+
+**Examples**
+```
+router R1
+router R2 as 65002
+add-router edge as 100
+```
+
+**Undo:** `no router <R>` — removes it and everything attached (links, sessions, loopbacks).
+""",
+    ),
+    (
+        "link", ("connect",),
+        """\
+### `link` · `connect` — cable two routers together
+
+Runs a cable between two routers and auto-addresses both ends.
+
+**Arguments**
+- `<A> <B>` — the two routers to connect (both must already exist).
+- `cost <n>` *(optional)* — the link's IGP metric. Defaults to **10**.
+
+**Examples**
+```
+link R1 R2
+connect R1 R3 cost 50
+```
+
+**Undo:** `no link <A> <B>` (alias of `destroy`) — pulls the cable for good. To model an outage instead, use `cut` / `repair`.
+""",
+    ),
+    (
+        "loopback", ("lo",),
+        """\
+### `loopback` · `lo` — add a loopback interface
+
+Gives a router a loopback with a fresh `/32` from the loopback pool. Loopbacks are the usual stable source/ID for iBGP sessions and handy prefixes to advertise.
+
+**Arguments**
+- `<R>` — the router to add the loopback to.
+
+**Examples**
+```
+loopback R1
+lo R2
+```
+
+**Undo:** `no loopback <R> [<ip>]` — frees the `/32`. Name the IP when the router has more than one loopback.
+""",
+    ),
+    (
+        "peer", ("bgp",),
+        """\
+### `peer` · `bgp` — open a BGP session
+
+Establishes a BGP peering between two routers. It's **iBGP** when both sit in the same AS and **eBGP** when they differ; if they aren't directly cabled the session is set up multihop automatically.
+
+**Arguments**
+- `<A> <B>` — the two routers to peer.
+
+**Examples**
+```
+peer R1 R2
+bgp R1 R4
+```
+
+**Undo:** `no peer <A> <B>` — tears the session down.
+
+*Tip: to peer a whole AS at once, use `ibgp-mesh`.*
+""",
+    ),
+    (
+        "advertise", ("adv",),
+        """\
+### `advertise` · `adv` — originate a prefix into BGP
+
+Makes a router announce a network into BGP. The router must already **know** the network — it has to be a connected, loopback, or static route — otherwise the command is rejected.
+
+**Arguments**
+- `<R>` — the originating router.
+- `<prefix>/<mask>` — the network to advertise, with an explicit mask. Accepts CIDR (`10.0.0.0/24`) or dotted (`10.0.0.0 255.255.255.0`).
+
+**Examples**
+```
+advertise R1 10.0.0.0/24
+adv R2 192.168.1.0 255.255.255.0
+```
+
+**Undo:** `no advertise <R> <prefix>` — stops originating it.
+""",
+    ),
+    (
+        "static", ("static-route",),
+        """\
+### `static` · `static-route` — install a static route
+
+Adds a manual route on a router toward a network via a next-hop IP. Handy for giving a router a prefix it can then `advertise`.
+
+**Arguments**
+- `<R>` — the router to install the route on.
+- `<prefix>` — the destination network (e.g. `10.9.0.0/24`).
+- `<next-hop>` — the next-hop IP address.
+
+**Examples**
+```
+static R1 10.9.0.0/24 10.0.0.2
+```
+
+**Undo:** `no static <R> <prefix>`.
+""",
+    ),
+    (
+        "ibgp-mesh", ("mesh",),
+        """\
+### `ibgp-mesh` · `mesh` — full-mesh iBGP across an AS
+
+Opens an iBGP session between every pair of routers in one AS (the classic full mesh), skipping any that already peer.
+
+**Arguments**
+- `as <asn>` — which AS to mesh. Defaults to **AS1**.
+
+**Examples**
+```
+ibgp-mesh as 1
+mesh as 65001
+```
+
+**Undo:** `no ibgp-mesh as <asn>` — closes the AS's iBGP sessions (eBGP is left alone).
+""",
+    ),
+    (
+        "neighbor", ("nb",),
+        """\
+### `neighbor` · `nb` — per-neighbor BGP policy
+
+Tunes one knob on a router's session toward a specific neighbor. These are the levers that drive best-path selection.
+
+**Arguments**
+- `<R>` — the router whose policy you're setting.
+- `<neighbor>` — the peer the policy applies to.
+- `<attr> [value]` — one of:
+  - `weight <n>` — *inbound*, local-only preference for routes **from** this neighbor (highest wins, checked first).
+  - `local-pref <n>` (`lp`) — *inbound* preference for routes from this neighbor, shared across the AS.
+  - `med <n>` — *outbound* metric hint sent **to** this neighbor (lower is preferred).
+  - `prepend <n>` — *outbound*; pads your AS-path `n` times on routes to this neighbor to make them less attractive.
+  - `next-hop-self` (`nhs`) — *one-sided*; advertise yourself as the next hop to this neighbor.
+
+**Examples**
+```
+neighbor R1 R2 weight 200
+nb R1 R3 local-pref 150
+neighbor R1 R4 prepend 3
+neighbor R1 R2 next-hop-self
+```
+
+**Undo:** `no neighbor <R> <neighbor> <attr>` — clears that knob back to default.
+""",
+    ),
+    (
+        "shutdown", (),
+        """\
+### `shutdown` — administratively disable an interface
+
+Admin-downs the interface on `<A>` that faces `<B>` (Cisco `shutdown`). The link stays cabled; this is a soft, deliberate state change rather than a fault.
+
+**Arguments**
+- `<A> <B>` — `<A>` is the router whose interface goes down; `<B>` is the neighbor it faces.
+
+**Examples**
+```
+shutdown R1 R2
+```
+
+**Undo:** `no shutdown <A> <B>` — brings the interface back up.
+""",
+    ),
+    (
+        "cut", (),
+        """\
+### `cut` — sever a cable (outage)
+
+Models a link failure: the cable between `<A>` and `<B>` goes down but stays in place, so it can be repaired. Think "shark eats cable."
+
+**Arguments**
+- `<A> <B>` — the two ends of the link.
+
+**Examples**
+```
+cut R1 R2
+```
+
+**Inverse:** `repair <A> <B>`.
+""",
+    ),
+    (
+        "repair", (),
+        """\
+### `repair` — fix a cut cable
+
+Brings a `cut` link back up between `<A>` and `<B>`.
+
+**Arguments**
+- `<A> <B>` — the two ends of the link.
+
+**Examples**
+```
+repair R1 R2
+```
+
+**Inverse:** `cut <A> <B>`.
+""",
+    ),
+    (
+        "destroy", (),
+        """\
+### `destroy` — pull a cable permanently
+
+Removes the link between `<A>` and `<B>` entirely, freeing both interfaces. Unlike `cut` (repairable) or `shutdown` (soft), this is permanent.
+
+**Arguments**
+- `<A> <B>` — the two ends of the link.
+
+**Examples**
+```
+destroy R1 R2
+```
+
+**Undo:** none directly — run `link <A> <B>` to re-cable them. (`no link` is an alias of `destroy`.)
+""",
+    ),
+    (
+        "send", ("ping",),
+        """\
+### `send` · `ping` — send a test packet
+
+Sources a packet from `<R>` (using its first interface address) toward a destination host IP and reports the hop-by-hop path it takes through the network.
+
+**Arguments**
+- `<R>` — the originating router (must have at least one interface).
+- `<dst-ip>` — a host address to reach. A network address is rejected; aim at a real interface IP.
+
+**Examples**
+```
+send R1 10.0.0.2
+ping R1 192.168.1.1
+```
+
+**Undo:** none — it's a read-only probe.
+""",
+    ),
+    (
+        "no", (),
+        """\
+### `no` — undo / inverse prefix
+
+Cisco-style negation: prefix any constructive verb with `no` to reverse it. The arguments match the original command.
+
+**Examples**
+```
+no router R1
+no advertise R1 10.0.0.0/24
+no peer R1 R2
+no neighbor R1 R2 weight
+```
+
+Each verb's own help lists its exact undo form.
+""",
+    ),
+    (
+        "help", ("?",),
+        """\
+### `help` · `?` — show help
+
+With no argument, lists every command. With a command name, shows detailed help for just that one.
+
+**Examples**
+```
+help
+help neighbor
+? send
+```
+""",
+    ),
+)
+
+_HELP_TOPICS: dict[str, str] = {canon: text for canon, _aliases, text in _TOPIC_DEFS}
+_HELP_ALIASES: dict[str, str] = {}
+for _canon, _aliases, _ in _TOPIC_DEFS:
+    _HELP_ALIASES[_canon] = _canon
+    for _alias in _aliases:
+        _HELP_ALIASES[_alias] = _canon
+
+
+def _help_for(topic: str) -> str:
+    """Detailed help for one verb, resolving aliases (`adv` -> `advertise`)."""
+    canon = _HELP_ALIASES.get(topic.lower())
+    if canon is None:
+        known = ", ".join(dict.fromkeys(c for c, _, _ in _TOPIC_DEFS))
+        raise CommandError(
+            f"no help for {topic!r}; try `help` or one of: {known}"
+        )
+    return _HELP_TOPICS[canon]
 
 
 # How dare you... to reject me?
@@ -397,6 +717,8 @@ def _cmd_help(world: World, args: list[str]) -> str:
         egg.rejections_left -= 1
         return random.choice(_HELP_REJECTIONS[stage])
 
+    if args:
+        return _help_for(args[0])
     return _HELP
 
 
