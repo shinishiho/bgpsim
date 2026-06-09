@@ -58,6 +58,32 @@ def _prefix(text: str) -> IPv4Network:
         raise CommandError(f"invalid prefix {text!r}")
 
 
+def _masked_prefix(tokens: list[str]) -> IPv4Network:
+    """Parse a user network that must carry an explicit mask.
+
+    `ipaddress.IPv4Network` accepts both a CIDR length and a dotted netmask
+    after the slash, so we just assemble `address/mask` and hand it over:
+      - CIDR slash notation:    `10.0.0.0/24`
+      - address + dotted mask:  `10.0.0.0 255.255.255.0`
+
+    A bare address is rejected so the operator always states the prefix length
+    instead of silently defaulting to a host route (`/32`).
+    """
+    if "/" in tokens[0]:
+        spec = tokens[0]
+    elif len(tokens) >= 2:
+        spec = f"{tokens[0]}/{tokens[1]}"
+    else:
+        raise CommandError(
+            f"a network mask is required: write {tokens[0]}/24 "
+            f"or {tokens[0]} 255.255.255.0"
+        )
+    try:
+        return IPv4Network(spec, strict=False)
+    except ValueError:
+        raise CommandError(f"invalid network {' '.join(tokens)!r}")
+
+
 def _need(args: list[str], n: int, usage: str) -> None:
     if len(args) < n:
         raise CommandError(f"usage: {usage}")
@@ -120,12 +146,16 @@ def _cmd_peer(world: World, args: list[str]) -> str:
 
 
 def _cmd_advertise(world: World, args: list[str]) -> str:
-    _need(args, 1, "advertise <router> [prefix]")
+    _need(args, 2, "advertise <router> <prefix>/<mask>")
     r = _router(world, args[0])
-    if len(args) >= 2:
-        net = _prefix(args[1])
-    else:  # convenience: spin up a fresh loopback and originate it
-        net = world.create_loopback(r).network
+    net = _masked_prefix(args[1:])
+    # Mirror Cisco's `network` statement: only originate a prefix the router
+    # actually has a route for (connected, loopback, or static).
+    if not any(route.network == net for route in r.routing_table.routes):
+        raise CommandError(
+            f"{r.name} has no route to {net}; originate only a network it "
+            f"actually has (a connected, loopback, or static route)"
+        )
     world.advertise(r, net)
     return f"{r.name} originates {net}"
 
@@ -207,7 +237,7 @@ _HELP = """\
 - `link <A> <B> [cost <n>]` — cable two routers
 - `loopback <R>` — add a loopback interface
 - `peer <A> <B>` — open a BGP session (needs a link)
-- `advertise <R> [prefix]` — originate a prefix (auto-loopback if omitted)
+- `advertise <R> <prefix>/<mask>` — originate a network the router has; mask required, e.g. `10.0.0.0/24` or `10.0.0.0 255.255.255.0`
 - `withdraw <R> <prefix>` — stop originating a prefix
 - `static <R> <prefix> <next-hop>` — install a static route
 - `no-static <R> <prefix>` — remove a static route
