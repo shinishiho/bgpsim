@@ -25,6 +25,11 @@ class BGPPeerInfo:
     # adj_rib_out by commit() (the one-tick publish delay).
     pending_out: list[BGPRoute] = field(default_factory=list)
     next_hop_self: bool = False
+    # Per-neighbor policies
+    weight_in:     int | None = None  # inbound: override weight on learned routes
+    local_pref_in: int | None = None  # inbound: override local-pref on learned routes
+    med_out:       int | None = None  # outbound: MED advertised to this peer
+    prepend_out:   int        = 0     # outbound eBGP: extra copies of own ASN
 
 
 class BGPSession:

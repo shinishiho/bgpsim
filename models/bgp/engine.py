@@ -198,6 +198,12 @@ class BGPEngine:
                     # Drop local_pref if the route is being sent via eBGP
                     route.local_pref = DEFAULT_LOCAL_PREF
 
+                # Inbound policy overrides, applied after normalization so they win
+                if side.weight_in is not None:
+                    route.weight = side.weight_in
+                if side.local_pref_in is not None:
+                    route.local_pref = side.local_pref_in
+
                 processing[route.prefix].append(route)
 
         # Rebuild loc_rib
@@ -239,10 +245,15 @@ class BGPEngine:
                         # (it has gone through one hop), drop MED
                         if out_route.as_path:
                             out_route.med = None
-                        out_route.as_path = [self.asn] + out_route.as_path
+                        # Natural eBGP prepend, plus any extra copies from policy
+                        out_route.as_path = [self.asn] * (1 + side.prepend_out) + out_route.as_path
                         out_route.next_hop = side.self_ip
                     elif side.next_hop_self or route.source.type is BGPRouteSourceType.LOCAL:
                         out_route.next_hop = side.self_ip
+
+                    # Outbound MED policy wins over the eBGP one-hop drop above
+                    if side.med_out is not None:
+                        out_route.med = side.med_out
 
                     out_routes.append(out_route)
 

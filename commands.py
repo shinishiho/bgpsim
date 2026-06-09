@@ -224,15 +224,57 @@ def _cmd_no_shutdown(world: World, args: list[str]) -> str:
     return ""
 
 
-def _cmd_next_hop_self(world: World, args: list[str]) -> str:
-    a, b = _two(world, args, "next-hop-self <R> <neighbor>")
-    world.set_next_hop_self(a, b, enabled=True)
+_NEIGHBOR_USAGE = (
+    "neighbor <R> <neighbor> <weight|local-pref|med|prepend|next-hop-self> [value]"
+)
+
+
+def _neighbor_int(rest: list[str], attr: str) -> int:
+    """Parse the integer value an attribute needs, or raise a usage error."""
+    if not rest or not rest[0].lstrip("-").isdigit():
+        raise CommandError(f"usage: neighbor <R> <neighbor> {attr} <number>")
+    return int(rest[0])
+
+
+def _cmd_neighbor(world: World, args: list[str]) -> str:
+    """Per-neighbor policy knobs under one Cisco-style verb."""
+    a, b = _two(world, args, _NEIGHBOR_USAGE)
+    if len(args) < 3:
+        raise CommandError(f"usage: {_NEIGHBOR_USAGE}")
+    attr, rest = args[2].lower(), args[3:]
+    if attr == "weight":
+        world.set_weight(a, b, _neighbor_int(rest, "weight"))
+    elif attr in ("local-pref", "localpref", "lp"):
+        world.set_local_pref(a, b, _neighbor_int(rest, "local-pref"))
+    elif attr == "med":
+        world.set_med(a, b, _neighbor_int(rest, "med"))
+    elif attr == "prepend":
+        world.set_prepend(a, b, _neighbor_int(rest, "prepend"))
+    elif attr in ("next-hop-self", "nhs"):
+        world.set_next_hop_self(a, b, enabled=True)
+    else:
+        raise CommandError(f"unknown neighbor attribute {attr!r}; {_NEIGHBOR_USAGE}")
     return ""
 
 
-def _cmd_no_next_hop_self(world: World, args: list[str]) -> str:
-    a, b = _two(world, args, "no next-hop-self <R> <neighbor>")
-    world.set_next_hop_self(a, b, enabled=False)
+def _cmd_no_neighbor(world: World, args: list[str]) -> str:
+    """Clear a per-neighbor policy knob: `no neighbor <R> <neighbor> <attr>`."""
+    a, b = _two(world, args, f"no {_NEIGHBOR_USAGE}")
+    if len(args) < 3:
+        raise CommandError(f"usage: no {_NEIGHBOR_USAGE}")
+    attr = args[2].lower()
+    if attr == "weight":
+        world.set_weight(a, b, None)
+    elif attr in ("local-pref", "localpref", "lp"):
+        world.set_local_pref(a, b, None)
+    elif attr == "med":
+        world.set_med(a, b, None)
+    elif attr == "prepend":
+        world.set_prepend(a, b, 0)
+    elif attr in ("next-hop-self", "nhs"):
+        world.set_next_hop_self(a, b, enabled=False)
+    else:
+        raise CommandError(f"unknown neighbor attribute {attr!r}; no {_NEIGHBOR_USAGE}")
     return ""
 
 
@@ -294,7 +336,7 @@ _HELP = """\
 | `advertise` · `adv` | `advertise <R> <prefix>/<mask>` | `no advertise <R> <prefix>` |
 | `static` · `static-route` | `static <R> <prefix> <next-hop>` | `no static <R> <prefix>` |
 | `ibgp-mesh` · `mesh` | `ibgp-mesh as <asn>` | `no ibgp-mesh as <asn>` |
-| `next-hop-self` · `nhs` | `next-hop-self <R> <neighbor>` | `no next-hop-self <R> <neighbor>` |
+| `neighbor` · `nb` | `neighbor <R> <nbr> <attr> [value]` | `no neighbor <R> <nbr> <attr>` |
 | `shutdown` | `shutdown <A> <B>` | `no shutdown <A> <B>` |
 | `cut` | `cut <A> <B>` | `repair <A> <B>` |
 | `repair` | `repair <A> <B>` | `cut <A> <B>` |
@@ -382,7 +424,7 @@ _NO_DISPATCH: dict[str, Callable[[World, list[str]], str]] = {
     "advertise": _cmd_no_advertise,  "adv": _cmd_no_advertise,
     "static": _cmd_no_static_route,  "static-route": _cmd_no_static_route,
     "ibgp-mesh": _cmd_no_mesh,       "mesh": _cmd_no_mesh,
-    "next-hop-self": _cmd_no_next_hop_self, "nhs": _cmd_no_next_hop_self,
+    "neighbor": _cmd_no_neighbor,    "nb": _cmd_no_neighbor,
     "shutdown": _cmd_no_shutdown,
     "help": _cmd_no_help,            "?": _cmd_no_help,
 }
@@ -409,7 +451,7 @@ _DISPATCH: dict[str, Callable[[World, list[str]], str]] = {
     "advertise": _cmd_advertise, "adv": _cmd_advertise,
     "static": _cmd_static_route, "static-route": _cmd_static_route,
     "ibgp-mesh": _cmd_mesh,      "mesh": _cmd_mesh,
-    "next-hop-self": _cmd_next_hop_self, "nhs": _cmd_next_hop_self,
+    "neighbor": _cmd_neighbor,   "nb": _cmd_neighbor,
     "shutdown": _cmd_shutdown,
     "no": _cmd_no,
     "cut": _cmd_cut,

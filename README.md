@@ -41,7 +41,7 @@ undoes with the `no` prefix shown in the last column.
 | `advertise` · `adv` | `advertise <R> <prefix>/<mask>` | `no advertise <R> <prefix>` |
 | `static` · `static-route` | `static <R> <prefix> <next-hop>` | `no static <R> <prefix>` |
 | `ibgp-mesh` · `mesh` | `ibgp-mesh as <asn>` | `no ibgp-mesh as <asn>` |
-| `next-hop-self` · `nhs` | `next-hop-self <R> <neighbor>` | `no next-hop-self <R> <neighbor>` |
+| `neighbor` · `nb` | `neighbor <R> <nbr> <attr> [value]` | `no neighbor <R> <nbr> <attr>` |
 | `shutdown` | `shutdown <A> <B>` | `no shutdown <A> <B>` |
 | `cut` | `cut <A> <B>` | `repair <A> <B>` |
 | `destroy` | `destroy <A> <B>` | `no link <A> <B>` |

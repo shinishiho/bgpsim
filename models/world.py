@@ -257,8 +257,8 @@ class World:
                 cisco,
             )
 
-    def destroy_bgp_session(self, router_a: Router, router_b: Router) -> None:
-        """Close the BGP session between two routers (`no neighbor`)."""
+    def _find_session(self, router_a: Router, router_b: Router) -> BGPSession:
+        """The BGP session between two routers, or raise if there isn't one."""
         session = next(
             (s for s in self.bgp_sessions.sessions
              if set(s.sides) == {router_a, router_b}),
@@ -268,6 +268,11 @@ class World:
             raise ValueError(
                 f"{router_a.name} has no BGP session with {router_b.name}"
             )
+        return session
+
+    def destroy_bgp_session(self, router_a: Router, router_b: Router) -> None:
+        """Close the BGP session between two routers (`no neighbor`)."""
+        session = self._find_session(router_a, router_b)
         self.bgp_sessions.destroy(session)
         for side in session.sides.values():
             self.clock.record(
@@ -288,16 +293,7 @@ class World:
         This is one-sided only, unlike most of the world commands that
         do the job for both sides.
         """
-        session = next(
-            (s for s in self.bgp_sessions.sessions
-             if set(s.sides) == {router, neighbor}),
-            None,
-        )
-        if session is None:
-            raise ValueError(
-                f"{router.name} has no BGP session with {neighbor.name}"
-            )
-        side = session.view(router)
+        side = self._find_session(router, neighbor).view(router)
         side.next_hop_self = enabled
         verb = "set" if enabled else "cleared"
         self.clock.record(
@@ -307,6 +303,100 @@ class World:
             f"router bgp {router.bgp_engine.asn}\n "
             f"{'' if enabled else 'no '}neighbor {side.peer_ip} next-hop-self",
         )
+
+    def set_weight(self, router: Router, neighbor: Router, weight: int | None) -> None:
+        """Set or clear the inbound weight on routes from `neighbor`."""
+        side = self._find_session(router, neighbor).view(router)
+        side.weight_in = weight
+        if weight is None:
+            self.clock.record(
+                "bgp",
+                f"{router.name}→{neighbor.name} weight cleared",
+                f"`{router.name}` cleared the weight on routes from `{neighbor.name}`",
+                f"router bgp {router.bgp_engine.asn}\n "
+                f"no neighbor {side.peer_ip} weight",
+            )
+        else:
+            self.clock.record(
+                "bgp",
+                f"{router.name}→{neighbor.name} weight {weight}",
+                f"`{router.name}` set weight `{weight}` on routes from `{neighbor.name}`",
+                f"router bgp {router.bgp_engine.asn}\n "
+                f"neighbor {side.peer_ip} weight {weight}",
+            )
+
+    def set_local_pref(self, router: Router, neighbor: Router, local_pref: int | None) -> None:
+        """Set or clear the inbound local-preference on routes from `neighbor`."""
+        side = self._find_session(router, neighbor).view(router)
+        side.local_pref_in = local_pref
+        rm = f"LP-{neighbor.name}-IN"
+        if local_pref is None:
+            self.clock.record(
+                "bgp",
+                f"{router.name}→{neighbor.name} local-pref cleared",
+                f"`{router.name}` cleared local-pref on routes from `{neighbor.name}`",
+                f"router bgp {router.bgp_engine.asn}\n "
+                f"no neighbor {side.peer_ip} route-map {rm} in",
+            )
+        else:
+            self.clock.record(
+                "bgp",
+                f"{router.name}→{neighbor.name} local-pref {local_pref}",
+                f"`{router.name}` set local-pref `{local_pref}` on routes from `{neighbor.name}`",
+                f"route-map {rm} permit 10\n set local-preference {local_pref}\n"
+                f"router bgp {router.bgp_engine.asn}\n "
+                f"neighbor {side.peer_ip} route-map {rm} in",
+            )
+
+    def set_med(self, router: Router, neighbor: Router, med: int | None) -> None:
+        """Set or clear the MED `router` advertises to `neighbor`."""
+        side = self._find_session(router, neighbor).view(router)
+        side.med_out = med
+        rm = f"MED-{neighbor.name}-OUT"
+        if med is None:
+            self.clock.record(
+                "bgp",
+                f"{router.name}→{neighbor.name} MED cleared",
+                f"`{router.name}` cleared the MED advertised to `{neighbor.name}`",
+                f"router bgp {router.bgp_engine.asn}\n "
+                f"no neighbor {side.peer_ip} route-map {rm} out",
+            )
+        else:
+            self.clock.record(
+                "bgp",
+                f"{router.name}→{neighbor.name} MED {med}",
+                f"`{router.name}` set MED `{med}` on routes advertised to `{neighbor.name}`",
+                f"route-map {rm} permit 10\n set metric {med}\n"
+                f"router bgp {router.bgp_engine.asn}\n "
+                f"neighbor {side.peer_ip} route-map {rm} out",
+            )
+
+    def set_prepend(self, router: Router, neighbor: Router, times: int) -> None:
+        """Prepend our own ASN some extra times on routes advertised to `neighbor`.
+
+        Make the as-path look longer, thus less attractive.
+        """
+        side = self._find_session(router, neighbor).view(router)
+        side.prepend_out = times
+        asn = router.bgp_engine.asn
+        rm = f"PREP-{neighbor.name}-OUT"
+        if times <= 0:
+            side.prepend_out = 0
+            self.clock.record(
+                "bgp",
+                f"{router.name}→{neighbor.name} prepend cleared",
+                f"`{router.name}` cleared AS-path prepend toward `{neighbor.name}`",
+                f"router bgp {asn}\n no neighbor {side.peer_ip} route-map {rm} out",
+            )
+        else:
+            chain = " ".join([str(asn)] * times)
+            self.clock.record(
+                "bgp",
+                f"{router.name}→{neighbor.name} prepend {times}",
+                f"`{router.name}` prepends AS{asn} ×{times} on routes to `{neighbor.name}`",
+                f"route-map {rm} permit 10\n set as-path prepend {chain}\n"
+                f"router bgp {asn}\n neighbor {side.peer_ip} route-map {rm} out",
+            )
 
     def advertise(self, router: Router, network: IPv4Network) -> None:
         """Originate a prefix into BGP from `router`.
