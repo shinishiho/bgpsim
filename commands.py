@@ -10,7 +10,6 @@ Timeline buttons in the UI.
 
 from __future__ import annotations
 
-import copy
 from dataclasses import dataclass, field
 from ipaddress import IPv4Address, IPv4Network
 from typing import TYPE_CHECKING, Callable
@@ -149,13 +148,6 @@ def _cmd_advertise(world: World, args: list[str]) -> str:
     _need(args, 2, "advertise <router> <prefix>/<mask>")
     r = _router(world, args[0])
     net = _masked_prefix(args[1:])
-    # Mirror Cisco's `network` statement: only originate a prefix the router
-    # actually has a route for (connected, loopback, or static).
-    if not any(route.network == net for route in r.routing_table.routes):
-        raise CommandError(
-            f"{r.name} has no route to {net}; originate only a network it "
-            f"actually has (a connected, loopback, or static route)"
-        )
     world.advertise(r, net)
     return f"{r.name} originates {net}"
 
@@ -299,108 +291,3 @@ def apply_command(world: World, line: str) -> CommandResult:
     except (CommandError, ValueError) as e:
         return CommandResult(ok=False, error=str(e))
     return CommandResult(ok=True, events=world.clock.events[before:], note=note)
-
-
-def seed_demo(world: World) -> None:
-    """A best-path "decision ladder" demo: one prefix, many competing paths.
-
-    Every external network below originates the *same* destination,
-    `203.0.113.0/24`, but each path is crafted to lose at exactly one rung of
-    the BGP best-path tie-break. Converge the sim (`>>`) and inspect `CORE`:
-    its Loc-RIB best path is the one that survives every rung, and the Timeline
-    narrates each selection. The ladder (see `BGPEngine.calculate_best_route`):
-
-        weight → local-pref → (locally-originated) → AS-path length
-               → MED → eBGP-over-iBGP → lowest router-id
-
-        rung that drops it    origin / path            crafted attribute
-        ───────────────────   ──────────────────────   ──────────────────────
-        weight                WGT0   (AS65007)          weight 0  (others 10)
-        local-pref            LP100  (AS65007)          local-pref 100 (< 200)
-        AS-path length        O3 via T3 (AS65013)       as-path length 2 (> 1)
-        MED                   MED100 (AS65004)          MED 100   (best: 50)
-        eBGP-over-iBGP        O5 via R2 (iBGP)          reaches CORE over iBGP
-        router-id             RIDHI  (AS65006)          router-id 10.6.6.6
-        ── WINNER ──          BEST   (AS65007)          router-id 10.1.1.1
-
-    `locally-originated` is the only rung not exercised (CORE originates
-    nothing of its own), so it stays a tie and the decision falls through it.
-
-    Topology — every link is single-hop eBGP except inside AS65000:
-
-                WGT0  LP100  MED100  RIDHI  BEST     T3 -- O3
-                   .    .      |      /     /        /
-                    '----'---- CORE ------''--------'     (AS65000)
-                                | iBGP
-                                R2 ---- O5
-
-    The engine has no command to set weight / local-pref / MED, so `originate()`
-    stamps them straight onto each originator's route. They then propagate
-    unchanged — this sim does not scrub weight/local-pref/MED across eBGP.
-
-    That propagation has a sharp edge: CORE re-advertises its chosen path to
-    every eBGP peer, and a looped-back winner (weight 10 / local-pref 200) would
-    beat a weight-0 or local-pref-100 *origin's own* route, so those origins
-    would stop advertising and never reach CORE. WGT0 and LP100 are therefore
-    placed in BEST's AS (65007): CORE's re-advertised winner carries 65007 in
-    its AS-path and is dropped at them by loop prevention, leaving their own
-    (deliberately worse) route intact so the weight / local-pref rungs can fire.
-    """
-    DEST = IPv4Network("203.0.113.0/24")
-
-    def originate(router: Router, *, weight: int = 0,
-                  local_pref: int = 100, med: int | None = None) -> None:
-        """Originate DEST from `router`, then stamp the crafted attributes onto
-        its origin (manual) route so they persist across recompute and ride
-        outbound to peers."""
-        world.advertise(router, DEST)
-        route = router.bgp_engine.manual_rib[DEST]
-        route.weight, route.local_pref, route.med = weight, local_pref, med
-        router.bgp_engine.loc_rib[DEST] = copy.deepcopy(route)
-
-    def peer_ebgp(origin: Router, *, weight: int = 10,
-                  local_pref: int = 200, med: int | None = 50) -> None:
-        """Cable `origin` straight to CORE, open eBGP, and originate DEST."""
-        world.create_link(core, origin)
-        world.create_bgp_session(core, origin)
-        originate(origin, weight=weight, local_pref=local_pref, med=med)
-
-    # --- our AS: the decision maker + one iBGP peer --------------------------
-    core = world.create_router(name="CORE", asn=65000)
-    r2 = world.create_router(name="R2", asn=65000)
-    world.create_link(core, r2)
-    world.create_bgp_session(core, r2)                       # iBGP
-
-    # --- direct eBGP candidates into CORE, each sunk at one rung -------------
-    # weight: a great path (lp 200, med 50) thrown out purely for weight 0.
-    # In AS65007 (BEST's AS) so loop prevention shields its own route -- see the
-    # docstring; otherwise it re-imports CORE's winner and never advertises.
-    peer_ebgp(world.create_router(name="WGT0", asn=65007), weight=0)
-    # local-pref: ties on weight, loses on local-pref 100 < 200. Also in 65007.
-    peer_ebgp(world.create_router(name="LP100", asn=65007), local_pref=100)
-    # MED: ties through AS-path, loses on MED 100 > 50.
-    peer_ebgp(world.create_router(name="MED100", asn=65004), med=100)
-
-    # router-id: ties the winner on every attribute, loses on a higher id.
-    ridhi = world.create_router(name="RIDHI", asn=65006)
-    ridhi.add_loopback(IPv4Network("10.6.6.6/32"))           # high router-id
-    peer_ebgp(ridhi)
-    # the winner: identical attributes to RIDHI, but the lowest router-id.
-    best = world.create_router(name="BEST", asn=65007)
-    best.add_loopback(IPv4Network("10.1.1.1/32"))            # low router-id
-    peer_ebgp(best)
-
-    # --- AS-path: O3 sits one AS behind transit T3, so its path is length 2 --
-    t3 = world.create_router(name="T3", asn=65003)
-    o3 = world.create_router(name="O3", asn=65013)
-    world.create_link(core, t3)
-    world.create_link(t3, o3)
-    world.create_bgp_session(core, t3)                       # eBGP transit
-    world.create_bgp_session(t3, o3)                         # eBGP origin
-    originate(o3, weight=10, local_pref=200, med=50)
-
-    # --- eBGP-over-iBGP: O5 is eBGP to R2, so it reaches CORE only via iBGP --
-    o5 = world.create_router(name="O5", asn=65005)
-    world.create_link(r2, o5)
-    world.create_bgp_session(r2, o5)                         # eBGP
-    originate(o5, weight=10, local_pref=200, med=50)

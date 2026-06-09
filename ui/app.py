@@ -16,7 +16,7 @@ from textual.widgets import (
 
 from models.world import World
 from models.router import Router
-from commands import apply_command, seed_demo, CommandResult
+from commands import apply_command, CommandResult
 
 from .command import CommandBar, CommandHistory
 from .timeline import TimelinePanel
@@ -51,10 +51,6 @@ class BGPSimApp(App):
     async def on_mount(self) -> None:
         self.theme = "rose-pine"
         self.world = World()
-        # seed_demo(self.world)
-        # Open with the playhead on the fully set-up world (tick 0), so the
-        # first `>` steps the sim instead of walking the setup events.
-        # self.world.clock.to_last()
         self._apply_responsive(self.size.width, self.size.height)
         await self._refresh_world_views()
 
