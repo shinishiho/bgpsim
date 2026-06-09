@@ -630,23 +630,24 @@ help neighbor
     ),
 )
 
-_HELP_TOPICS: dict[str, str] = {canon: text for canon, _aliases, text in _TOPIC_DEFS}
-_HELP_ALIASES: dict[str, str] = {}
-for _canon, _aliases, _ in _TOPIC_DEFS:
-    _HELP_ALIASES[_canon] = _canon
-    for _alias in _aliases:
-        _HELP_ALIASES[_alias] = _canon
+# Every alias (and the canonical verb itself) maps straight to its help text,
+# so `help adv` and `help advertise` resolve the same topic in one lookup.
+_HELP_BY_ALIAS: dict[str, str] = {
+    name: text
+    for canon, aliases, text in _TOPIC_DEFS
+    for name in (canon, *aliases)
+}
+_HELP_VERBS = ", ".join(canon for canon, _, _ in _TOPIC_DEFS)
 
 
 def _help_for(topic: str) -> str:
     """Detailed help for one verb, resolving aliases (`adv` -> `advertise`)."""
-    canon = _HELP_ALIASES.get(topic.lower())
-    if canon is None:
-        known = ", ".join(dict.fromkeys(c for c, _, _ in _TOPIC_DEFS))
+    text = _HELP_BY_ALIAS.get(topic.lower())
+    if text is None:
         raise CommandError(
-            f"no help for {topic!r}; try `help` or one of: {known}"
+            f"no help for {topic!r}; try `help` or one of: {_HELP_VERBS}"
         )
-    return _HELP_TOPICS[canon]
+    return text
 
 
 # How dare you... to reject me?
