@@ -7,3 +7,21 @@ requires-python = ">=3.14"
 dependencies = [
     "textual>=8.2.7",
 ]
+
+[project.optional-dependencies]
+# Natural-language command routing with a fine-tuned FunctionGemma model.
+# Install with `uv sync --extra gemma` (or `uv run --extra gemma ...`). Kept
+# optional so the base simulator stays a pure-Textual install. Training itself
+# runs on Modal (see gemma/modal_train.py); these are the deps for local
+# inference + evaluation of the fetched checkpoint.
+gemma = [
+    "torch",
+    "transformers>=4.50",
+    "accelerate>=0.30",
+    "huggingface-hub",
+    # Apple-Silicon native inference runtime: ~2.5x faster per request than
+    # PyTorch-MPS on the 270M model. Auto-selected by gemma/runner.py when
+    # present; the torch path stays the fallback (and the only path on Linux/
+    # CUDA, e.g. Modal training). Marker keeps it off non-Apple-Silicon hosts.
+    "mlx-lm; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]

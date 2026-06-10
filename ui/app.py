@@ -1,4 +1,6 @@
-from textual import on, events
+import asyncio
+
+from textual import on, events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import (
@@ -17,6 +19,7 @@ from textual.widgets import (
 from models.world import World
 from models.router import Router
 from commands import apply_command, CommandResult, _help_egg
+from gemma.runner import GemmaRouter
 
 from .command import CommandBar, CommandHistory
 from .timeline import TimelinePanel
@@ -62,9 +65,19 @@ class BGPSimApp(App):
 
     world: World
 
+    # Natural-language fallback. Off unless a fine-tuned FunctionGemma checkpoint
+    # is on disk and torch/transformers import -- so a plain install behaves
+    # exactly as before and an unknown verb is just an error. See gemma/README.md.
+    _nl_enabled: bool = False
+    _nl_router: GemmaRouter | None = None
+
     async def on_mount(self) -> None:
         self.theme = "rose-pine"
         self.world = World()
+        self._nl_enabled = GemmaRouter.is_available()
+        self.query_one(CommandBar).nl_enabled = self._nl_enabled
+        if self._nl_enabled:
+            self._preload_router()
         self._apply_responsive(self.size.width, self.size.height)
         await self._refresh_world_views()
 
@@ -108,7 +121,14 @@ class BGPSimApp(App):
 
     @on(Input.Submitted)
     async def append_msg(self, event: Input.Submitted) -> None:
-        """Parse the typed command, apply it to the world, echo + refresh."""
+        """Route the typed line, then echo + refresh.
+
+        A leading `>` forces direct flat-grammar parsing. Without it, when the
+        FunctionGemma router is available, the line is treated as a
+        natural-language request; with the router unavailable, every line is
+        parsed directly. This avoids natural-language phrases whose first word
+        collides with a command verb being misparsed as that command.
+        """
         line = event.value.strip()
         event.input.clear()
         if not line:
@@ -116,17 +136,94 @@ class BGPSimApp(App):
 
         self.query_one(CommandBar).record(line)
 
-        result = apply_command(self.world, line)
+        forced = line.startswith(">")
+        if forced:
+            line = line[1:].strip()
+            if not line:
+                return
+
+        if self._nl_enabled and not forced and not self._is_no_help(line):
+            self.notify("Interpreting…", title="🤖 natural language", timeout=3)
+            self._interpret_nl(line)
+            return
+
+        await self._echo_command(line, line, apply_command(self.world, line))
+
+    @staticmethod
+    def _is_no_help(line: str) -> bool:
+        """The `no help` easter egg always runs directly, never through NL."""
+        return line.lower().split() in (["no", "help"], ["no", "?"])
+
+    async def _echo_command(self, label: str, command: str, result: CommandResult) -> None:
+        """Record one command in the history and repaint the world surfaces.
+
+        `label` is what the history list shows (the raw line a user typed);
+        `command` is the flat-grammar line that was actually applied -- the two
+        differ when the natural-language router rewrote a request.
+        """
         # Jump the playhead to the events this command just recorded, so the
         # Timeline shows them. Only when it produced events, so a failed or
         # no-op command doesn't yank the cursor away from where the user is.
         if result.events:
             self.world.clock.to_last()
-        await self.query_one(CommandHistory).add_command(
-            line, self._format_result(line, result)
-        )
+        detail = self._format_result(command, result)
+        if label != command:
+            detail = f"`{label}`\n\n🤖 interpreted as:\n\n{detail}"
+        await self.query_one(CommandHistory).add_command(label, detail)
         self.query_one(CommandBar).sulking = _help_egg.is_sulking()
         await self._refresh_world_views()
+
+    @work(exclusive=True, group="nl_preload", thread=True)
+    def _preload_router(self) -> None:
+        """Warm the FunctionGemma model in the background at startup.
+
+        Loading the checkpoint takes a couple of seconds; doing it on a worker
+        thread the moment the app mounts means the first natural-language
+        request pays only for generation, not the cold load.
+        """
+        try:
+            if self._nl_router is None:
+                self._nl_router = GemmaRouter()
+            self._nl_router.load()
+        except Exception:
+            # A preload failure is non-fatal: the real translate call surfaces
+            # the error to the user, and direct flat-grammar input still works.
+            pass
+
+    @work(exclusive=True, group="nl")
+    async def _interpret_nl(self, line: str) -> None:
+        """Translate a natural-language line to a command off the UI thread.
+
+        The model load + generation are blocking, so they run in a worker
+        thread; only the cheap world mutation + repaint happen back on the loop.
+        """
+        translation, error = await asyncio.to_thread(self._translate_blocking, line)
+        if error is not None:
+            await self.query_one(CommandHistory).add_command(
+                line, f"`{line}`\n\n❌ natural-language router failed: {error}"
+            )
+            return
+        if not translation.ok:
+            raw = (translation.raw or "").strip()
+            hint = f"\n\n```\n{raw}\n```" if raw else ""
+            await self.query_one(CommandHistory).add_command(
+                line, f"`{line}`\n\n🤖 couldn't turn that into a command.{hint}"
+            )
+            return
+        await self._echo_command(line, translation.command, apply_command(self.world, translation.command))
+
+    def _translate_blocking(self, line: str):
+        """Run on a worker thread: lazily build the router and translate `line`.
+
+        Returns (translation, None) on success or (None, error_message) if the
+        model failed to load or generate.
+        """
+        try:
+            if self._nl_router is None:
+                self._nl_router = GemmaRouter()
+            return self._nl_router.translate(line), None
+        except Exception as exc:  # model download/load/inference failure
+            return None, str(exc)
 
     @staticmethod
     def _format_result(line: str, result: CommandResult) -> str:

@@ -17,11 +17,14 @@ class CommandBar(Input):
     """Placed at the bottom, for user to type commands."""
 
     DEFAULT_PLACEHOLDER = "Lost? Type \"help\" or \"?\" to display the list of commands."
+    NL_PLACEHOLDER = "Ask in plain English, or prefix > for a literal command (e.g. \"> help\")."
     SULK_PLACEHOLDER = "Lost? Good luck."
 
-    # Flipped on by the app while `no help` is mid-sulk; the watcher swaps the
+    # Flipped on by the app while `no help` is mid-sulk, and set once at mount
+    # when the natural-language router is available; the watchers swap the
     # placeholder text to match.
     sulking: reactive[bool] = reactive(False)
+    nl_enabled: reactive[bool] = reactive(False)
 
     def __init__(self) -> None:
         super().__init__(
@@ -36,8 +39,19 @@ class CommandBar(Input):
         self._index: int | None = None
         self._draft: str = ""
 
+    def _refresh_placeholder(self) -> None:
+        if self.sulking:
+            self.placeholder = self.SULK_PLACEHOLDER
+        elif self.nl_enabled:
+            self.placeholder = self.NL_PLACEHOLDER
+        else:
+            self.placeholder = self.DEFAULT_PLACEHOLDER
+
     def watch_sulking(self, sulking: bool) -> None:
-        self.placeholder = self.SULK_PLACEHOLDER if sulking else self.DEFAULT_PLACEHOLDER
+        self._refresh_placeholder()
+
+    def watch_nl_enabled(self, nl_enabled: bool) -> None:
+        self._refresh_placeholder()
 
     def record(self, line: str) -> None:
         """Append a submitted command, skipping immediate duplicates, and snap
