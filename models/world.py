@@ -81,7 +81,7 @@ class World:
                 return ConvergeResult(True, ticks - 1)  # the last tick is empty, nothing happened
         return ConvergeResult(False, max_ticks)
 
-    def build_ibgp_mesh(self, asn: int = 1) -> list[BGPSession]:
+    def build_ibgp_mesh(self, asn: int) -> list[BGPSession]:
         """Create a full iBGP mesh for every router in `asn`.
 
         Get all routers in `asn` and send them to the BGPSessionManager
@@ -92,7 +92,7 @@ class World:
             self._record_session_open(session)
         return sessions
 
-    def destroy_ibgp_mesh(self, asn: int = 1) -> list[BGPSession]:
+    def destroy_ibgp_mesh(self, asn: int) -> list[BGPSession]:
         """Tear down the iBGP sessions inside `asn`.
 
         Closes every iBGP session whose both endpoints live in `asn` (whether

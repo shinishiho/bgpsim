@@ -482,7 +482,7 @@ static R1 10.9.0.0/24 10.0.0.2
 Opens an iBGP session between every pair of routers in one AS (the classic full mesh), skipping any that already peer.
 
 **Arguments**
-- `as <asn>` — which AS to mesh. Defaults to **AS1**.
+- `as <asn>` — which AS to mesh.
 
 **Examples**
 ```
