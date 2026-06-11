@@ -1,4 +1,4 @@
-from textual import on
+from textual import events, on
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.reactive import reactive
@@ -28,9 +28,60 @@ class CommandBar(Input):
             placeholder=self.DEFAULT_PLACEHOLDER,
             id="command"
         )
+        # Shell-style command history. `_index` points at the entry currently
+        # surfaced in the bar, or is None when the user is at the live (draft)
+        # line below the newest entry. `_draft` stashes whatever was being typed
+        # before they started walking back through history.
+        self._history: list[str] = []
+        self._index: int | None = None
+        self._draft: str = ""
 
     def watch_sulking(self, sulking: bool) -> None:
         self.placeholder = self.SULK_PLACEHOLDER if sulking else self.DEFAULT_PLACEHOLDER
+
+    def record(self, line: str) -> None:
+        """Append a submitted command, skipping immediate duplicates, and snap
+        the cursor back to the live line."""
+        if line and (not self._history or self._history[-1] != line):
+            self._history.append(line)
+        self._index = None
+        self._draft = ""
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "up":
+            event.prevent_default()
+            event.stop()
+            self._recall_older()
+        elif event.key == "down":
+            event.prevent_default()
+            event.stop()
+            self._recall_newer()
+
+    def _recall_older(self) -> None:
+        """Up arrow: step toward older commands."""
+        if not self._history:
+            return
+        if self._index is None:
+            self._draft = self.value
+            self._index = len(self._history) - 1
+        elif self._index > 0:
+            self._index -= 1
+        self._fill(self._history[self._index])
+
+    def _recall_newer(self) -> None:
+        """Down arrow: step toward newer commands, then back to the draft."""
+        if self._index is None:
+            return
+        if self._index < len(self._history) - 1:
+            self._index += 1
+            self._fill(self._history[self._index])
+        else:
+            self._index = None
+            self._fill(self._draft)
+
+    def _fill(self, text: str) -> None:
+        self.value = text
+        self.cursor_position = len(text)
 
 
 class CommandHistory(Horizontal):

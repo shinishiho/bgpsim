@@ -114,6 +114,8 @@ class BGPSimApp(App):
         if not line:
             return
 
+        self.query_one(CommandBar).record(line)
+
         result = apply_command(self.world, line)
         # Jump the playhead to the events this command just recorded, so the
         # Timeline shows them. Only when it produced events, so a failed or
