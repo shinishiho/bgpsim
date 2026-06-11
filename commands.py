@@ -310,6 +310,13 @@ def _cmd_send(world: World, args: list[str]) -> str:
             f"{args[1]} is a network, not a host; send to a specific address "
             f"(e.g. a router's interface IP)"
         )
+    # A bare address that is a subnet's base address is a network, not a host.
+    entry = r.routing_table.lookup(dst)
+    if entry is not None and entry.network.prefixlen < 32 and dst == entry.network.network_address:
+        raise CommandError(
+            f"{dst} is the network address of {entry.network}, not a host; "
+            f"send to a specific address (e.g. a router's interface IP)"
+        )
     src = next(iter(r.interfaces.values())).ip
     pkt = Packet(src=src, dst=dst, payload="ping")
     outcome = r.forward(pkt)
