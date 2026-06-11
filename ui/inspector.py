@@ -22,30 +22,39 @@ class InspectorPanel(Vertical):
         super().__init__(id="inspector_panel", classes="-hidden")
 
     def compose(self) -> ComposeResult:
-        yield Static("Inspector", id="inspector_title")
-        with TabbedContent(id="inspector_tabs"):
-            with TabPane("Routing Table", id="routing_table"):
-                yield VerticalScroll(Static("", id="rt_body"))
-            with TabPane("BGP Loc RIB", id="bgp_loc_rib"):
-                yield VerticalScroll(Static("", id="rib_body"))
+        top = Vertical(id="inspector_top")
+        top.border_title = "Inspector"
+        with top:
+            with TabbedContent(id="inspector_tabs"):
+                with TabPane("Routing Table", id="routing_table"):
+                    yield VerticalScroll(Static("", id="rt_body"))
+                with TabPane("BGP Loc RIB", id="bgp_loc_rib"):
+                    yield VerticalScroll(Static("", id="rib_body"))
+        ifaces_section = Vertical(id="inspector_ifaces")
+        ifaces_section.border_title = "Interfaces"
+        with ifaces_section:
+            yield VerticalScroll(Static("", id="iface_body"))
 
     def show(self, router: Router | None) -> None:
         """Render the selected router's RIB + BGP Loc-RIB (or a hint if None)."""
-        title = self.query_one("#inspector_title", Static)
+        top = self.query_one("#inspector_top", Vertical)
         rt = self.query_one("#rt_body", Static)
         rib = self.query_one("#rib_body", Static)
+        ifaces = self.query_one("#iface_body", Static)
 
         if router is None:
-            title.update("Inspector")
+            top.border_title = "Inspector"
             rt.update("(click a router in the topology)")
             rib.update("(click a router in the topology)")
+            ifaces.update("(click a router in the topology)")
             return
 
-        title.update(
+        top.border_title = (
             f"{router.name}   id {router.router_id}   AS{router.bgp_engine.asn}"
         )
         rt.update(self._fmt_routing_table(router))
         rib.update(self._fmt_loc_rib(router))
+        ifaces.update(self._fmt_interfaces(router))
 
     @classmethod
     def _route_kind(cls, r: Route) -> str:
@@ -104,3 +113,23 @@ class InspectorPanel(Vertical):
                 ))
             )
         return "\n\n".join(blocks) or "(empty Loc-RIB)"
+
+    @classmethod
+    def _fmt_interfaces(cls, router: Router) -> str:
+        """Per-interface block: name, IP/prefix, and the peer on the other end."""
+        blocks = []
+        for iface in router.interfaces.values():
+            if iface.link is None:
+                color, other = "$accent", "loopback"
+            else:
+                color = "$success"
+                peer = iface.link.get_peer_of(router)
+                other = f"→ {peer.name} ({iface.link.get_ip(peer)})"
+            blocks.append(
+                "\n".join((
+                    f"[{color}]{iface.name}[/]",
+                    f"  {iface.ip}/{iface.network.prefixlen}",
+                    f"  {other}",
+                ))
+            )
+        return "\n\n".join(blocks) or "(no interfaces)"

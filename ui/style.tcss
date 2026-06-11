@@ -63,8 +63,29 @@ Screen {
   width: 100%;
 }
 
+#inspector_top {
+  height: 1fr;
+  border: round $primary;
+  border-title-align: center;
+}
+
 #inspector_panel.-hidden {
   display: none;
+}
+
+#inspector_tabs {
+  height: 1fr;
+}
+
+#inspector_tabs Tab {
+  width: 1fr;
+  text-align: center;
+}
+
+#inspector_ifaces {
+  height: 1fr;
+  border: round $primary;
+  border-title-align: center;
 }
 
 #center {
