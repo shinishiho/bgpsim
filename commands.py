@@ -154,13 +154,13 @@ def _cmd_advertise(world: World, args: list[str]) -> str:
 
 
 def _cmd_static_route(world: World, args: list[str]) -> str:
-    _need(args, 3, "static <router> <prefix> <next-hop>")
+    _need(args, 3, "static <router> <prefix>/<mask> <next-hop>")
     r = _router(world, args[0])
-    net = _prefix(args[1])
     try:
-        next_hop = IPv4Address(args[2])
+        next_hop = IPv4Address(args[-1])
     except ValueError:
-        raise CommandError(f"invalid next-hop {args[2]!r}")
+        raise CommandError(f"invalid next-hop {args[-1]!r}")
+    net = _masked_prefix(args[1:-1])
     world.add_static_route(r, net, next_hop)
     return f"{r.name} static route to {net} via {next_hop}"
 
@@ -179,6 +179,8 @@ def _cmd_no_advertise(world: World, args: list[str]) -> str:
 
 def _cmd_mesh(world: World, args: list[str]) -> str:
     asn = _asn(args, "ibgp-mesh as <asn>")
+    if not any(r.bgp_engine.asn == asn for r in world.routers.routers):
+        raise CommandError(f"no routers in AS{asn}")
     sessions = world.build_ibgp_mesh(asn)
     return f"meshed {len(sessions)} new iBGP session(s) in AS{asn}"
 
@@ -341,7 +343,7 @@ _HELP = """\
 | `loopback` · `lo` | `loopback <R>` | `no loopback <R> [ip]` |
 | `peer` · `bgp` | `peer <A> <B>` | `no peer <A> <B>` |
 | `advertise` · `adv` | `advertise <R> <prefix>/<mask>` | `no advertise <R> <prefix>` |
-| `static` · `static-route` | `static <R> <prefix> <next-hop>` | `no static <R> <prefix>` |
+| `static` · `static-route` | `static <R> <prefix>/<mask> <next-hop>` | `no static <R> <prefix>` |
 | `ibgp-mesh` · `mesh` | `ibgp-mesh as <asn>` | `no ibgp-mesh as <asn>` |
 | `neighbor` · `nb` | `neighbor <R> <nbr> <attr> [value]` | `no neighbor <R> <nbr> <attr>` |
 | `shutdown` | `shutdown <A> <B>` | `no shutdown <A> <B>` |
@@ -470,12 +472,13 @@ Adds a manual route on a router toward a network via a next-hop IP. Handy for gi
 
 **Arguments**
 - `<R>` — the router to install the route on.
-- `<prefix>` — the destination network (e.g. `10.9.0.0/24`).
+- `<prefix>/<mask>` — the destination network with an **explicit** mask, in CIDR (`10.9.0.0/24`) or dotted-netmask (`10.9.0.0 255.255.255.0`) form. A bare address is rejected rather than defaulting to a `/32` host route.
 - `<next-hop>` — the next-hop IP address.
 
 **Examples**
 ```
 static R1 10.9.0.0/24 10.0.0.2
+static R1 10.9.0.0 255.255.255.0 10.0.0.2
 ```
 
 **Undo:** `no static <R> <prefix>`.
@@ -644,17 +647,6 @@ _HELP_BY_ALIAS: dict[str, str] = {
     for canon, aliases, text in _TOPIC_DEFS
     for name in (canon, *aliases)
 }
-_HELP_VERBS = ", ".join(canon for canon, _, _ in _TOPIC_DEFS)
-
-
-def _help_for(topic: str) -> str:
-    """Detailed help for one verb, resolving aliases (`adv` -> `advertise`)."""
-    text = _HELP_BY_ALIAS.get(topic.lower())
-    if text is None:
-        raise CommandError(
-            f"no help for {topic!r}; try `help` or one of: {_HELP_VERBS}"
-        )
-    return text
 
 
 # How dare you... to reject me?
@@ -707,7 +699,8 @@ def _cmd_help(world: World, args: list[str]) -> str:
         return random.choice(_HELP_REJECTIONS[stage])
 
     if args:
-        return _help_for(args[0])
+        # Help anything is help, whatever
+        return _HELP_BY_ALIAS.get(args[0].lower(), _HELP)
     return _HELP
 
 
