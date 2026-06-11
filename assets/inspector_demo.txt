@@ -1,0 +1,13 @@
+# Demo topology for the Inspector screenshot (assets/inspector.svg).
+# R1+R2 in AS100, R3 in AS200; R1 advertises its loopback so R3 learns it
+# over eBGP. Select R3 to show its routing table, BGP Loc RIB, and interfaces.
+router R1 as 100
+router R2 as 100
+router R3 as 200
+link R1 R2
+link R2 R3
+peer R1 R2
+peer R2 R3
+loopback R1
+advertise R1 10.0.0.0/32
+>>
