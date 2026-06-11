@@ -19,7 +19,7 @@ from textual.widgets import (
 from models.world import World
 from models.router import Router
 from commands import apply_command, CommandResult, _help_egg
-from gemma.runner import GemmaRouter
+from gemma_new.runner import GemmaRouter
 
 from .command import CommandBar, CommandHistory
 from .timeline import TimelinePanel
@@ -67,7 +67,7 @@ class BGPSimApp(App):
 
     # Natural-language fallback. Off unless a fine-tuned FunctionGemma checkpoint
     # is on disk and torch/transformers import -- so a plain install behaves
-    # exactly as before and an unknown verb is just an error. See gemma/README.md.
+    # exactly as before and an unknown verb is just an error. See gemma_new/README.md.
     _nl_enabled: bool = False
     _nl_router: GemmaRouter | None = None
 
@@ -142,7 +142,7 @@ class BGPSimApp(App):
             if not line:
                 return
 
-        if self._nl_enabled and not forced and not self._is_no_help(line):
+        if self._nl_enabled and not forced and not self._is_help(line):
             self.notify("Interpreting…", title="🤖 natural language", timeout=3)
             self._interpret_nl(line)
             return
@@ -150,9 +150,9 @@ class BGPSimApp(App):
         await self._echo_command(line, line, apply_command(self.world, line))
 
     @staticmethod
-    def _is_no_help(line: str) -> bool:
-        """The `no help` easter egg always runs directly, never through NL."""
-        return line.lower().split() in (["no", "help"], ["no", "?"])
+    def _is_help(line: str) -> bool:
+        """Just run help requests directly, NL keeps hallucinating args."""
+        return line.lower().split() in (["help"], ["?"], ["no", "help"], ["no", "?"])
 
     async def _echo_command(self, label: str, command: str, result: CommandResult) -> None:
         """Record one command in the history and repaint the world surfaces.
@@ -205,9 +205,10 @@ class BGPSimApp(App):
             return
         if not translation.ok:
             raw = (translation.raw or "").strip()
-            hint = f"\n\n```\n{raw}\n```" if raw else ""
             await self.query_one(CommandHistory).add_command(
-                line, f"`{line}`\n\n🤖 couldn't turn that into a command.{hint}"
+                line,
+                f"`{line}`\n\n🤖 I don't understand that...",
+                debug=raw or None,
             )
             return
         await self._echo_command(line, translation.command, apply_command(self.world, translation.command))

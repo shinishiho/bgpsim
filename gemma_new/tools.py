@@ -1,8 +1,9 @@
+import inspect
 from typing import Callable
 
 MODEL_ID = "google/functiongemma-270m-it"
 DEVELOPER_PROMPT = (
-    "You are a model that can do function calling with the following functions"
+    "You are a model that can do function calling with the following functions\n"
 )
 
 
@@ -264,14 +265,28 @@ TOOLS: tuple[Callable[..., str], ...] = (
 )
 
 TOOLS_BY_NAME: dict[str, Callable[..., str]] = {fn.__name__: fn for fn in TOOLS}
+# Accepted parameter names per tool, used to drop stray kwargs in to_command_line.
+_PARAMS_BY_NAME: dict[str, frozenset[str]] = {
+    name: frozenset(inspect.signature(fn).parameters) for name, fn in TOOLS_BY_NAME.items()
+}
 
 
 def to_command_line(name: str, arguments: dict) -> str:
     """Render a model-issued tool call back into a flat-grammar command line.
 
-    Raises KeyError for an unknown tool name and TypeError when the model
-    omitted a required argument -- both are caught by the caller, which falls
-    back to showing the raw text.
+    Raises KeyError for an unknown tool name and TypeError when a *required* arg
+    is missing -- both are caught by the caller, which falls back to the raw text.
+
+    Two classes of arg are dropped before the call, defensively:
+      * ``None`` values -- a slot the model emitted empty.
+      * kwargs the chosen tool doesn't accept -- when a query names an entity the
+        model sometimes fills a *sibling* tool's slot with a real value, e.g.
+        ``show_help`` gets ``router_a``/``router_b`` from "help peer R1 with R2".
+        Its own intent (``command:peer``) is right; only the leaked extras would
+        make ``fn(**arguments)`` raise. Filtering to the real signature keeps it.
+    A genuinely missing *required* arg still raises TypeError, so real failures
+    are still surfaced.
     """
     fn = TOOLS_BY_NAME[name]
-    return fn(**arguments)
+    accepted = _PARAMS_BY_NAME[name]
+    return fn(**{k: v for k, v in arguments.items() if k in accepted and v is not None})

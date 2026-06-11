@@ -1,12 +1,20 @@
 """Local inference: turn a plain-English request into a command line.
 
-`GemmaRouter` loads FunctionGemma (the fine-tuned checkpoint when present,
-otherwise the base model), shows it the same tool surface it was trained on,
-generates a single tool call, and maps that call back to a `commands.py` line.
+The notebook-faithful counterpart to `gemma/runner.py`. `GemmaRouter` loads
+FunctionGemma (the fine-tuned checkpoint when present, otherwise the base
+model), shows it the same tool surface it was trained on, generates a single
+tool call, and maps that call back to a `commands.py` line.
+
+The one difference from the old runner is the tool-schema block: this one
+renders the **plain, per-tool** declarations (one `get_json_schema` per tool,
+no cross-tool parameter union), because `gemma_new` trains on that format. The
+inference prompt must match training byte-for-byte, so a checkpoint trained by
+`gemma_new.train` must be served here, not by `gemma/runner.py` (which unions
+the schemas for the old union-trained weights). See `gemma_new/README.md`.
 
 On Apple Silicon, inference runs through MLX (Apple's native runtime) when
-`mlx-lm` is installed -- ~2.5x faster per request than PyTorch-MPS on this 270M
-model, and a faster cold load. Elsewhere (or without mlx-lm) it falls back to
+`mlx-lm` is installed -- faster per request and a faster cold load than
+PyTorch-MPS on this 270M model. Elsewhere (or without mlx-lm) it falls back to
 PyTorch. Either backend is imported lazily inside `load()` so merely importing
 this module (e.g. to read `MODEL_ID`) is cheap and never pulls in the heavy
 stack -- the Textual UI relies on that to stay importable without the `gemma`
@@ -20,7 +28,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from gemma.tools import (  # re-exported for the trainer + callers
+from gemma_new.tools import (  # re-exported for callers
     DEVELOPER_PROMPT,
     MODEL_ID,
     TOOLS,
@@ -64,9 +72,10 @@ class Translation:
 def _coerce(value: str) -> str | int | None:
     """Numbers come back as ints so command rendering matches the schema.
 
-    A bare ``None`` maps to Python ``None`` -- FunctionGemma's chat template
-    expands every call to the *union* of all tool parameters and fills the ones
-    this verb doesn't use with ``None``, so the caller drops those.
+    A bare ``None`` maps to Python ``None`` and is dropped by the caller. The
+    non-union targets `gemma_new` trains on list only the args a verb fills, so
+    ``None`` slots are not expected -- but we still tolerate one defensively, in
+    case the model echoes an empty slot.
     """
     value = value.strip()
     if value == "None":
@@ -79,9 +88,8 @@ def _coerce(value: str) -> str | int | None:
 def parse_tool_call(text: str) -> tuple[str, dict] | None:
     """Pull (name, arguments) out of FunctionGemma's decoded output, or None.
 
-    Unused parameters (rendered as ``key:None``) are dropped, leaving only the
-    slots this verb actually fills -- exactly the kwargs ``to_command_line``
-    expects.
+    Any ``key:None`` slot is dropped, leaving only the args this verb actually
+    fills -- exactly the kwargs ``to_command_line`` expects.
     """
     call = _CALL_RE.search(text)
     if not call:
@@ -216,7 +224,10 @@ class GemmaRouter:
         self._model.eval()
 
     def _tool_schemas(self) -> list[dict]:
-        # The 22-tool schema block is identical every call; build it once.
+        # The 22-tool schema block is identical every call; build it once. Each
+        # tool gets its own plain declaration (its real params only) -- the same
+        # non-union block `gemma_new.train.build_tool_schemas` feeds the trainer,
+        # so the inference prompt matches what the checkpoint was trained on.
         if self._schemas is None:
             from transformers.utils import get_json_schema
 
@@ -286,7 +297,7 @@ class GemmaRouter:
 
 
 if __name__ == "__main__":
-    # `python -m gemma.runner "spin up R7 and peer it with R1"` for a quick try.
+    # `python -m gemma_new.runner "spin up R7 and peer it with R1"` for a quick try.
     import sys
 
     router = GemmaRouter()

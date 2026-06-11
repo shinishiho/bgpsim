@@ -19,6 +19,7 @@ gemma = [
     "transformers>=4.50",
     "accelerate>=0.30",
     "huggingface-hub",
+    "datasets",
     # Apple-Silicon native inference runtime: ~2.5x faster per request than
     # PyTorch-MPS on the 270M model. Auto-selected by gemma/runner.py when
     # present; the torch path stays the fallback (and the only path on Linux/

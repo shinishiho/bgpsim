@@ -1,31 +1,31 @@
-import math
+import json
 import random
 from itertools import product
 from string import Formatter
-from gemma.tools import DEVELOPER_PROMPT, TOOLS
+from gemma_new.tools import DEVELOPER_PROMPT, TOOLS
 
 # Dataset size presets. `size` scales the whole set; each command's share is
 # then weighted by its template-space size (see _per_tool_targets), so richer
 # commands appear more often and tiny ones don't dominate by repetition.
 SIZES = ("SMALL", "MEDIUM", "LARGE", "MAXIMUM")
-_SIZE_BASE = {"SMALL": 6, "MEDIUM": 18, "LARGE": 48}  # per-tool base count
+_SIZE_BASE = {"SMALL": 500, "MEDIUM": 1500, "LARGE": 5000}  # per-tool base count
 _RATIO_EXPONENT = 0.5    # compress template-space size (sqrt) into a weight
-_MAXIMUM_CAP = 20_000    # per-tool ceiling for MAXIMUM (generator slots are ~infinite)
+_MAXIMUM_CAP = 50_000    # per-tool ceiling for MAXIMUM (generator slots are ~infinite)
 _EXHAUST_STREAK = 2_000  # consecutive duplicate draws that signal a space is drained
 
 # Random arguments to fill into the templates
 ROUTERS = [
     "R1",
     "R2",
-    "R3",
-    "R4",
+    "r3",
+    "r4",
     "R5",
     "R18",
     "R36",
-    "R67",
+    "r67",
     "R100",
     "Edge",
-    "Core",
+    "core",
     "RR1",
     "PE1",
     "CE1",
@@ -34,6 +34,13 @@ ROUTERS = [
     "Onii-chan",
     "Nahida",
     "Hutao",
+    "longroutername",
+    "arandomstringthatisverylong",
+    "asdfouiwerjv",
+    "gpduwejr",
+    "home",
+    "company",
+    "Uni",
 ]
 ASNS = [1, 18, 36, 67, 69, 100, 200, 420, 1412, 65001, 65002, 64512]
 COSTS = [1, 5, 10, 18, 20, 36, 50, 67, 69, 100]
@@ -64,7 +71,7 @@ JOIN_LEAD = ["between", ""]
 JOIN_MID = ["and", ""]
 
 # Routers
-ROUTER_VERB_ADD = ["add", "create", "make", "spin up", "set up", "establish"]
+ROUTER_VERB_ADD = ["add", "create", "make", "spin up", "set up", "establish", ""]
 ROUTER_VERB_REMOVE = ["remove", "delete", "get rid of", "tear down", "destroy"]
 ROUTER_EXTRA_VERB_ADD = ["give me", "I need", "I want", "build"]
 ROUTER_TARGET = ["router", "device", "node"]
@@ -99,7 +106,7 @@ def templates_destroy_router() -> list[str]:
 
 # Links
 # Verb noun + target or verb pair (direct)
-LINK_VERB_PAIR = ["connect", "link", "wire up", "plug", "hook up", "cable"]
+LINK_VERB_PAIR = ["connect", "link", "wire up", "plug", "hook up", "cable", ""]
 LINK_VERB_NOUN = ["create", "add", "set up", "make"]
 LINK_VERB_UNPAIR = ["disconnect", "unplug", "permanently disconnect"]
 LINK_VERB_UNNOUN = ["remove", "delete", "permanently remove"]
@@ -373,9 +380,10 @@ def templates_remove_static_route() -> list[str]:
 # iBGP mesh. Mesh nouns carry their correct article as (article, noun) -- "an
 # ibgp" vs "a full mesh" disagree -- and the article is optional, so each noun
 # yields both "build an ibgp mesh ..." and the bare "build ibgp mesh ...".
-IBGP_VERB_BUILD = ["build", "create", "set up", "configure", "establish", "make"]
+IBGP_VERB_BUILD = ["build", "create", "set up", "configure", "establish", "make", ""]
 IBGP_VERB_REMOVE = ["remove", "tear down", "delete", "drop", "destroy", "get rid of"]
 IBGP_MESH_BUILD = [
+    ("a", "mesh"),
     ("an", "ibgp mesh"),
     ("an", "ibgp full mesh"),
     ("a", "full ibgp mesh"),
@@ -383,13 +391,14 @@ IBGP_MESH_BUILD = [
     ("", "ibgp everywhere"),
 ]
 IBGP_MESH_REMOVE = [
+    ("the", "mesh"),
     ("the", "ibgp mesh"),
     ("the", "ibgp full mesh"),
     ("the", "full ibgp mesh"),
     ("the", "full mesh of ibgp"),
     ("", "ibgp"),
 ]
-IBGP_AS_PREP = ["in", "across", "for", "within", "inside", "throughout"]
+IBGP_AS_PREP = ["in", "across", "for", "within", "inside", "throughout", ""]
 
 
 def _ibgp_templates(verbs: list[str], meshes: list[tuple[str, str]]) -> list[str]:
@@ -453,11 +462,6 @@ def templates_set_neighbor_policy() -> list[str]:
         templates.append(" ".join(filter(None, [
             c, "{router}", "use", "{attribute}", "{value}", fr, noun, "{neighbor}",
         ])))
-    # possessive: "set {neighbor}'s {attribute} to {value} on {router}"
-    for s, to, on in product(set_starts, POLICY_TO, POLICY_ON_ROUTER):
-        templates.append(" ".join(filter(None, [
-            s, "{neighbor}'s", "{attribute}", to, "{value}", on, "{router}",
-        ])))
     # next-hop-self (value-less, via {nhs}) --------------------------------
     for s, on, fr, noun in product(
         nhs_starts, POLICY_ON_ROUTER, POLICY_FOR_NEIGHBOR, NEIGHBOR_NOUN
@@ -469,10 +473,6 @@ def templates_set_neighbor_policy() -> list[str]:
         templates.append(" ".join(filter(None, [
             c, "{router}", "use", "{nhs}", fr, noun, "{neighbor}",
         ])))
-    for s, on in product(nhs_starts, POLICY_ON_ROUTER):
-        templates.append(
-            " ".join(filter(None, [s, "{neighbor}'s", "{nhs}", on, "{router}"]))
-        )
     return templates
 
 
@@ -888,19 +888,29 @@ _TEMPLATES = {
 }
 
 
-def _conversation(query: str, name: str, arguments: dict) -> dict:
-    """Wrap one (query, tool call) pair as a FunctionGemma chat conversation."""
+def _conversation(query: str, name: str, arguments: dict, split: str) -> dict:
+    """Wrap one (query, tool call) pair as a FunctionGemma chat record.
+
+    The assistant call carries only the arguments this verb actually uses -- the
+    exact shape google/mobile-actions stores and the notebook trains on. (Loading
+    such records through a *typed* Arrow column -- the HF dataset viewer's
+    "auto-converted to Parquet", or `Dataset.from_list` -- would union the struct
+    fields across rows and inject `None` fillers; the notebook sidesteps that by
+    formatting to prompt/completion strings first, and so does `format.py`.)
+
+    `metadata` carries the per-example train/eval split, mirroring the record
+    shape of google/mobile-actions so `apply_format` can read it straight across.
+    """
     return {
         "messages": [
             {"role": "developer", "content": DEVELOPER_PROMPT},
             {"role": "user", "content": query},
             {
                 "role": "assistant",
-                "tool_calls": [
-                    {"type": "function", "function": {"name": name, "arguments": arguments}}
-                ],
+                "tool_calls": [{"function": {"name": name, "arguments": arguments}}],
             },
-        ]
+        ],
+        "metadata": split,
     }
 
 
@@ -920,13 +930,26 @@ def _per_tool_targets(built: dict[str, list[str]], size: str) -> dict[str, int]:
     return {name: max(base // 2, round(base * w / mean_w)) for name, w in weights.items()}
 
 
-def build_conversations(size: str = "MEDIUM", seed: int = 42) -> list[dict]:
-    """Build a shuffled, de-duplicated list of training conversations.
+# Fraction of (deduplicated) examples tagged "eval"; the rest are "train". The
+# split is per-example random, so every tool keeps ~this share in each bucket.
+EVAL_FRACTION = 0.1
 
-    `size` (SMALL/MEDIUM/LARGE/MAXIMUM) scales the whole set; each command's
-    share is proportional to its template-space size. Identical phrasings within
-    a command are dropped, and a command stops early once its space is drained
-    (a long run of duplicate draws).
+
+def build_dataset(
+    size: str = "MEDIUM", seed: int = 42, eval_fraction: float = EVAL_FRACTION
+) -> list[dict]:
+    """Build a shuffled, de-duplicated list of FunctionGemma chat records.
+
+    Each record is ``{"messages": [...], "metadata": "train"|"eval"}`` -- the same
+    shape google/mobile-actions ships, so the rest of the pipeline (apply_format,
+    SFT, eval) follows Google's notebook unchanged, only sourcing the data from
+    our template engine instead of a downloaded jsonl.
+
+    `size` (SMALL/MEDIUM/LARGE/MAXIMUM) scales the whole set; each command's share
+    is proportional to its template-space size. Identical phrasings within a
+    command are dropped, and a command stops early once its space is drained (a
+    long run of duplicate draws). `eval_fraction` of the kept examples are tagged
+    "eval", the rest "train".
     """
     size = size.upper()
     if size not in SIZES:
@@ -934,7 +957,7 @@ def build_conversations(size: str = "MEDIUM", seed: int = 42) -> list[dict]:
     rng = random.Random(seed)
     built = {name: fn() for name, fn in _TEMPLATES.items()}  # built once, reused for weights
     targets = _per_tool_targets(built, size)
-    convs: list[dict] = []
+    records: list[dict] = []
     for fn in TOOLS:
         name = fn.__name__
         templates, target = built[name], targets[name]
@@ -947,23 +970,25 @@ def build_conversations(size: str = "MEDIUM", seed: int = 42) -> list[dict]:
                 continue
             miss_streak = 0
             seen.add(query)
-            convs.append(_conversation(query, name, arguments))
-    rng.shuffle(convs)
-    return convs
+            split = "eval" if rng.random() < eval_fraction else "train"
+            records.append(_conversation(query, name, arguments, split))
+    rng.shuffle(records)
+    return records
 
 
 if __name__ == "__main__":
-    # Quick eyeball: `python -m gemma.dataset` prints a LARGE set + per-tool spread.
+    # Quick eyeball: `python -m gemma_new.dataset` prints a LARGE set + spread.
     import json
     from collections import Counter
 
-    sample = build_conversations(size="LARGE")
+    sample = build_dataset(size="LARGE")
     counts = Counter(c["messages"][2]["tool_calls"][0]["function"]["name"] for c in sample)
-    print(f"{len(sample)} conversations ({len(TOOLS)} tools), LARGE")
+    splits = Counter(c["metadata"] for c in sample)
+    print(f"{len(sample)} records ({len(TOOLS)} tools), LARGE  splits={dict(splits)}")
     for name, n in counts.most_common():
         print(f"  {name:22s} {n}")
     print("\nsamples:")
     for conv in sample[:6]:
         user = conv["messages"][1]["content"]
         call = conv["messages"][2]["tool_calls"][0]["function"]
-        print(f"  {user!r}\n    -> {call['name']}({json.dumps(call['arguments'])})")
+        print(f"  [{conv['metadata']}] {user!r}\n    -> {call['name']}({json.dumps(call['arguments'])})")
