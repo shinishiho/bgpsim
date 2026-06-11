@@ -103,5 +103,5 @@ and routers will have `.1` and `.2` address.
 ## Acknowledgment
 
 - Networklessons.com for beautifully laid out lectures about BGP basics, mechanisms, attributes, etc.
-(that said, access is limited pass chapter 1, since I'm not a member).
+(that said, access is limited past chapter 1, since I'm not a member).
 - Claude contributes ~50% of the code, mainly including refactors, logic bug fix, realistic BGP compliance, UI, etc.
