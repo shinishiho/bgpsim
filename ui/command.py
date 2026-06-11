@@ -61,7 +61,6 @@ class CommandHistory(Horizontal):
         listview.index = None
         await listview.insert(0, [ListItem(Label(f"{self._cmd_count}  {line}"), id=item_id)])
         listview.index = 0
-        await self.query_one("#cmd_detail", Markdown).update(detail)
 
     @on(ListView.Highlighted, "#cmd_list")
     async def _show_highlighted(self, event: ListView.Highlighted) -> None:
