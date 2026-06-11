@@ -319,7 +319,10 @@ def _cmd_send(world: World, args: list[str]) -> str:
             f"{dst} is the network address of {entry.network}, not a host; "
             f"send to a specific address (e.g. a router's interface IP)"
         )
-    src = next(iter(r.interfaces.values())).ip
+    # Source from the egress interface toward the destination (Cisco-style),
+    # falling back to the first interface when there is no route to dst (the
+    # forward() call below will then report the unreachable destination).
+    src = entry.interface.ip if entry is not None else next(iter(r.interfaces.values())).ip
     pkt = Packet(src=src, dst=dst, payload="ping")
     outcome = r.forward(pkt)
     path = " -> ".join(pkt.hops)
