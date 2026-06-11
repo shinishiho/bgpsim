@@ -35,9 +35,9 @@ class RoutingTable:
         if existing:
             best_ad = min(r.route_type.value for r in existing)
             if best_ad < entry.route_type.value:
-                print(f"Route for {entry.network} already exists with better AD, so not installing")
+                # A better-AD route already wins for this prefix; keep it.
                 return
-            print(f"Route for {entry.network} already exists with same or worse AD, so it will be replaced")
+            # Equal-or-better AD: replace the existing route(s) for this prefix.
             self.routes = [r for r in self.routes if r.network != entry.network]
 
         self.routes.append(entry)
